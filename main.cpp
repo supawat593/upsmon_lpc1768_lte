@@ -12,11 +12,25 @@
 #include "Sim7600Cellular.h"
 #include "USBSerial.h"
 
+#include "FATFileSystem.h"
+#include "SPIFBlockDevice.h"
+
+#define firmware_vers "631107"
+
+#define INITIAL_APP_FILE "initial_script.txt"
+#define SPIF_MOUNT_PATH "spif"
+#define FULL_SCRIPT_FILE_PATH "/" SPIF_MOUNT_PATH "/" INITIAL_APP_FILE
+
 // Blinking rate in milliseconds
 #define BLINKING_RATE 500ms
 #define CRLF "\r\n"
 
 DigitalOut led(LED1, 1);
+
+FATFileSystem fs(SPIF_MOUNT_PATH);
+SPIFBlockDevice bd(MBED_CONF_SPIF_DRIVER_SPI_MOSI,
+                   MBED_CONF_SPIF_DRIVER_SPI_MISO,
+                   MBED_CONF_SPIF_DRIVER_SPI_CLK, MBED_CONF_SPIF_DRIVER_SPI_CS);
 
 // static UnbufferedSerial pc(USBTX, USBRX);
 static BufferedSerial mdm(MDM_TXD_PIN, MDM_RXD_PIN, 115200);
@@ -39,6 +53,7 @@ DigitalIn usb_det(USB_DET_PIN);
 BusIn dipsw(DIPSW_P4_PIN, DIPSW_P3_PIN, DIPSW_P2_PIN, DIPSW_P1_PIN);
 
 volatile bool isWake = false;
+volatile bool is_script_raed = false;
 
 // char *pc2uart = new char[1];
 // char *uart2pc = new char[1];
@@ -57,15 +72,17 @@ char cpsi3[128];
 char str_topic[64];
 char mqtt_msg[256];
 
-char usb_ret[128];
+// char usb_ret[128];
+volatile bool is_usb_cnnt = false;
 volatile bool is_msg_usb = false;
 volatile char is_idle_rs232 = true;
 
-const char *str_cmd[] = {"Q1", "Q4", "QF"}; // 1phase
+// const char *str_cmd[] = {"Q1", "Q4", "QF"}; // 1phase
 const char *str_ret[] = {
     "(221.0 204.0 219.0 000 50.9 2.26 27.0 00000000",
     "(222.7 000.0 000.0 204.0 222.0 000 000 50.9 382 384 108.4 27.0 IM",
-    "(07 204.0 49.8 208.6 50.3 152 010.5 433 414 100.2 03.4 01111111"};
+    "(07 204.0 49.8 208.6 50.3 152 010.5 433 414 100.2 03.4 01111111",
+    "NO_RESP1", "NO_RESP2"};
 
 bool bmqtt_start = false;
 bool bmqtt_cnt = false;
@@ -74,37 +91,57 @@ bool bmqtt_cnt = false;
 
 Thread blink_thread, netstat_thread, capture_thread, usb_thread;
 
+init_script_t init_script;
 struct tm struct_tm;
 
 Mail<mail_t, 16> mail_box;
+Mail<mail_t, 8> ret_usb_mail;
 
 void printHEX(unsigned char *msg, unsigned int len);
 int read_xtc_to_char(char *tbuf, int size, char end);
+void read_initial_script();
+void apply_script(FILE *file);
 
 uint8_t read_dipsw() { return (~dipsw.read()) & 0x0f; }
 
 void usb_passthrough() {
   printf("start usb_passthrough Thread...\r\n");
   USBSerial pc2;
+
   uint8_t a, b;
   // char *a = new char[1];
   while (true) {
+
     while (pc2.connected()) {
-      if (is_msg_usb) {
-        is_msg_usb = false;
-        pc2.printf("%s\n", usb_ret);
+      is_usb_cnnt = true;
+      //   if (is_msg_usb) {
+      //     is_msg_usb = false;
+      //     pc2.printf("%s\n", usb_ret);
+      //   }
+
+      mail_t *xmail = ret_usb_mail.try_get_for(Kernel::Clock::duration(100));
+      if (xmail != nullptr) {
+        printf("usb_resp : %s" CRLF, xmail->resp);
+        pc2.printf("%s\n", xmail->resp);
+        ret_usb_mail.free(xmail);
       }
-      if (pc2.readable()) {
-        a = pc2.getc();
-        rs232.write(&a, 1);
-      }
-      if (rs232.readable()) {
-        if (is_idle_rs232) {
+
+      //   if (is_idle_rs232) {
+      while (is_idle_rs232) {
+
+        if (pc2.readable()) {
+          a = pc2.getc();
+          rs232.write(&a, 1);
+        }
+        if (rs232.readable()) {
+
           b = rs232.read(&b, 1);
           pc2.write(&b, 1);
         }
       }
     }
+
+    is_usb_cnnt = false;
     ThisThread::sleep_for(chrono::milliseconds(3000));
   }
 }
@@ -112,6 +149,18 @@ void usb_passthrough() {
 void capture_thread_routine() {
 
   char ret_rs232[128];
+  char str_cmd[6][20];
+  char delim[] = ",";
+  char *ptr;
+  ptr = strtok(init_script.full_cmd, delim);
+  int n_cmd = 0;
+
+  while (ptr != 0) {
+    // strcpy(str_cmd_buff[k], ptr);
+    sscanf(ptr, "\"%[^\"]\"", str_cmd[n_cmd]);
+    n_cmd++;
+    ptr = strtok(NULL, delim);
+  }
 
   while (true) {
     printf("*********************************" CRLF);
@@ -120,7 +169,7 @@ void capture_thread_routine() {
 
     is_idle_rs232 = false;
 
-    for (int j = 0; j < 3; j++) {
+    for (int j = 0; j < n_cmd; j++) {
       mail_t *mail = mail_box.try_alloc();
 
       memset(ret_rs232, 0, 128);
@@ -133,14 +182,27 @@ void capture_thread_routine() {
       xtc232->send(mail->cmd);
 
       read_xtc_to_char(ret_rs232, 128, '\n');
-    //   strcpy(ret_rs232, str_ret[j]);
+      //   strcpy(ret_rs232, str_ret[j]);
 
       if (strlen(ret_rs232) > 0) {
         strcpy(mail->resp, ret_rs232);
 
-        memset(usb_ret, 0, 128);
-        strcpy(usb_ret, ret_rs232);
+        // memset(usb_ret, 0, 128);
+        // strcpy(usb_ret, ret_rs232);
+
         is_msg_usb = true;
+
+        // <---------- mail for usb return msg ------------->
+        mail_t *xmail = ret_usb_mail.try_alloc();
+        memset(xmail->resp, 0, 128);
+        strcpy(xmail->resp, mail->resp);
+
+        if (is_usb_cnnt) {
+          ret_usb_mail.put(xmail);
+        } else {
+          ret_usb_mail.free(xmail);
+        }
+        // <------------------------------------------------>
 
         // printf("cmd=%s : ret=%s" CRLF, mail->cmd, mail->resp);
         mail_box.put(mail);
@@ -167,7 +229,11 @@ void kick_wdt() {
 void blink_routine() {
   while (true) {
     led = !led;
-    ThisThread::sleep_for(BLINKING_RATE);
+    if (is_script_raed) {
+      ThisThread::sleep_for(BLINKING_RATE);
+    } else {
+      ThisThread::sleep_for(chrono::milliseconds(BLINKING_RATE / 5));
+    }
   }
 }
 
@@ -229,9 +295,12 @@ int main() {
   printf("\r\n\n-------------------------------------\r\n");
   printf("| Hello,I am UPSMON_K22F_SIM7600E-H |\r\n");
   printf("-------------------------------------\r\n");
+  printf("Firmware Version: %s" CRLF, firmware_vers);
   printf("SystemCoreClock : %.3f MHz.\r\n", SystemCoreClock / 1000000.0);
   printf("timestamp : %d\r\n", (unsigned int)rtc_read());
   printf("capture period : %d minutes\r\n", read_dipsw());
+
+  read_initial_script();
 
   _parser = new ATCmdParser(&mdm, "\r\n", 8000, 256);
   //_parser->debug_on(1);
@@ -267,7 +336,7 @@ int main() {
     printf("iccid=  %s\r\n", iccid);
   }
 
-  while (modem->get_creg() < 1)
+  while (modem->get_creg() != 1)
     ;
   printf("NW Registered...\r\n");
 
@@ -276,7 +345,7 @@ int main() {
     printf("sig=%d ber=%d\r\n", sig, ber);
   }
 
-  modem->set_creg(1);
+  modem->set_creg(2);
 
   ntp_sync();
   last_ntp_sync = (unsigned int)rtc_read();
@@ -287,11 +356,14 @@ int main() {
     modem->mqtt_accquire_client(imei);
 
     char dns_ip[16];
-    if (modem->dns_resolve(mqtt_broker, dns_ip) < 0) {
+    // if (modem->dns_resolve(mqtt_broker, dns_ip) < 0) {
+    if (modem->dns_resolve(init_script.broker, dns_ip) < 0) {
       memset(dns_ip, 0, 16);
       strcpy(dns_ip, mqtt_broker_ip);
     }
-    bmqtt_cnt = modem->mqtt_connect(dns_ip, mqtt_usr, mqtt_pwd, mqtt_port);
+    // bmqtt_cnt = modem->mqtt_connect(dns_ip, mqtt_usr, mqtt_pwd, mqtt_port);
+    bmqtt_cnt = modem->mqtt_connect(dns_ip, init_script.usr, init_script.pwd,
+                                    init_script.port);
   }
 
   last_rtc_check_NW = (unsigned int)rtc_read();
@@ -321,9 +393,14 @@ int main() {
       memset(str_topic, 0, 64);
       memset(mqtt_msg, 0, 256);
 
-      sprintf(str_topic, "UPSMON/%s", imei);
-      sprintf(mqtt_msg, payload_pattern, imei, mail->utc, model_Name, site_ID,
-              mail->cmd, mail->resp);
+      //   sprintf(str_topic, "UPSMON/%s", imei);
+      sprintf(str_topic, "%s/%s", init_script.topic_path, imei);
+      //   sprintf(mqtt_msg, payload_pattern, imei, mail->utc, model_Name,
+      //   site_ID,
+      //           mail->cmd, mail->resp);
+      sprintf(mqtt_msg, payload_pattern, imei, mail->utc, init_script.model,
+              init_script.siteID, mail->cmd, mail->resp);
+      //   bmqtt_cnt = (modem->mqtt_connect_stat() == 1) ? true : false;
 
       if (bmqtt_cnt) {
         modem->mqtt_publish(str_topic, mqtt_msg);
@@ -363,32 +440,56 @@ int main() {
       printf(CRLF "<----- Checking NW. Status ----->" CRLF);
       printf("timestamp : %d\r\n", (unsigned int)rtc_read());
 
-      char msg[32];
-      if (_parser->send("AT+CCLK?") &&
-          _parser->scanf("+CCLK: \"%[^\"]\"\r\n", msg)) {
-        printf("msg= %s\r\n", msg);
-        sync_rtc(msg);
-        printf("timestamp : %d\r\n", (unsigned int)rtc_read());
-      }
+      //   if (modem->get_creg() == 1) {
+      if (modem->check_attachNW()) {
+        modem->get_creg();
 
-      modem->get_csq(&sig, &ber);
-      printf("sig=%d ber=%d\r\n", sig, ber);
+        char msg[32];
+        if (_parser->send("AT+CCLK?") &&
+            _parser->scanf("+CCLK: \"%[^\"]\"\r\n", msg)) {
+          printf("msg= %s\r\n", msg);
+          sync_rtc(msg);
+          printf("timestamp : %d\r\n", (unsigned int)rtc_read());
+        }
 
-      modem->get_creg();
-      memset(cpsi3, 0, 128);
+        modem->get_csq(&sig, &ber);
+        printf("sig=%d ber=%d\r\n", sig, ber);
 
-      if (modem->get_cpsi(cpsi3) > 0) {
-        printf("cpsi=> %s\r\n", cpsi3);
-      }
+        memset(cpsi3, 0, 128);
 
-      char ipaddr[32];
-      if (modem->get_IPAddr(ipaddr) > 0) {
-        printf("ipaddr= %s\r\n", ipaddr);
-      }
+        if (modem->get_cpsi(cpsi3) > 0) {
+          printf("cpsi=> %s\r\n", cpsi3);
+        }
 
-      if (((unsigned int)rtc_read() - last_ntp_sync) > 3600) {
-        ntp_sync();
-        last_ntp_sync = (unsigned int)rtc_read();
+        char ipaddr[32];
+        if (modem->get_IPAddr(ipaddr) > 0) {
+          printf("ipaddr= %s\r\n", ipaddr);
+        }
+
+        if (((unsigned int)rtc_read() - last_ntp_sync) > 3600) {
+          ntp_sync();
+          last_ntp_sync = (unsigned int)rtc_read();
+        }
+
+        if (modem->mqtt_connect_stat() < 1) {
+          char dns_ip[16];
+          //   if (modem->dns_resolve(mqtt_broker, dns_ip) < 0) {
+          if (modem->dns_resolve(init_script.broker, dns_ip) < 0) {
+            memset(dns_ip, 0, 16);
+            strcpy(dns_ip, mqtt_broker_ip);
+          }
+          bmqtt_cnt =
+              //   modem->mqtt_connect(dns_ip, mqtt_usr, mqtt_pwd, mqtt_port);
+              bmqtt_cnt = modem->mqtt_connect(
+                  dns_ip, init_script.usr, init_script.pwd, init_script.port);
+        }
+
+      } else {
+        mdm_flight = 1;
+        ThisThread::sleep_for(500ms);
+        mdm_flight = 0;
+        bmqtt_cnt = false;
+        printf("NW Connection Fail: On/Off Flight Mode" CRLF);
       }
     }
 
@@ -450,4 +551,90 @@ int read_xtc_to_char(char *tbuf, int size, char end) {
   }
 
   return count;
+}
+
+void read_initial_script() {
+
+  bd.init();
+  int err = fs.mount(&bd);
+
+  if (err) {
+    printf("%s filesystem mount failed\r\n", fs.getName());
+  }
+
+  FILE *file = fopen(FULL_SCRIPT_FILE_PATH, "r");
+
+  if (file != NULL) {
+    printf("initial script found\r\n");
+
+    // apply_update(file, POST_APPLICATION_ADDR );
+    apply_script(file);
+    // remove(FULL_UPDATE_FILE_PATH);
+  }
+  //  else {
+  //     printf("No update found to apply\r\n");
+  // }
+
+  fs.unmount();
+  bd.deinit();
+}
+
+void apply_script(FILE *file) {
+  fseek(file, 0, SEEK_END);
+  long len = ftell(file);
+  printf("initial script file size is %ld bytes\r\n", len);
+  fseek(file, 0, SEEK_SET);
+
+  int result = 0;
+  // allocate memory to contain the whole file:
+  char *buffer = (char *)malloc(sizeof(char) * len);
+  if (buffer == NULL) {
+    printf("malloc : Memory error" CRLF);
+  }
+
+  // copy the file into the buffer:
+  result = fread(buffer, 1, len, file);
+  if (result != len) {
+    printf("file %s : Reading error" CRLF, FULL_SCRIPT_FILE_PATH);
+  }
+
+  //   printHEX((unsigned char *)buffer, len);
+  //   printf("buffer -> \r\n%s\r\n\n", buffer);
+
+  char script_buff[len];
+  int idx = 0;
+  while ((strncmp(&buffer[idx], "START:", 6) != 0) && (idx < len - 6)) {
+    idx++;
+  }
+  if (idx < len) {
+    memcpy(&script_buff, &buffer[idx], len - idx);
+    // printf("script_buf: %s" CRLF, script_buff);
+  }
+
+  if (sscanf(script_buff, init_cfg_pattern, init_script.broker,
+             &init_script.port, init_script.usr, init_script.pwd,
+             init_script.topic_path, init_script.full_cmd, init_script.model,
+             init_script.siteID) == 8) {
+    if (init_script.topic_path[strlen(init_script.topic_path) - 1] == '/') {
+      init_script.topic_path[strlen(init_script.topic_path) - 1] = '\0';
+    }
+    is_script_raed = true;
+
+    printf("\r\n<-------------------------------->\r\n");
+    printf("    broker: %s" CRLF, init_script.broker);
+    printf("    port: %d" CRLF, init_script.port);
+    printf("    usr: %s" CRLF, init_script.usr);
+    printf("    pwd: %s" CRLF, init_script.pwd);
+    printf("    topic_path: %s" CRLF, init_script.topic_path);
+    printf("    full_cmd: %s" CRLF, init_script.full_cmd);
+    printf("    model: %s" CRLF, init_script.model);
+    printf("    siteID: %s" CRLF, init_script.siteID);
+    printf("<-------------------------------->\r\n\n");
+  }
+
+  /* the whole file is now loaded in the memory buffer. */
+
+  // terminate
+  fclose(file);
+  free(buffer);
 }

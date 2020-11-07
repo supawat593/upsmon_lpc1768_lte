@@ -76,16 +76,17 @@ int Sim7600Cellular::set_creg(int n) {
 }
 
 int Sim7600Cellular::get_creg() {
+  int n=0;
   int stat = 0;
   char ret[20];
 
-  if (_atc->send("AT+CREG?") && _atc->recv("+CREG: %s\r\n", ret)) {
+  if (_atc->send("AT+CREG?") && _atc->scanf("+CREG: %[^\n]\r\n", ret)) {
     printf("pattern found +CREG: %s\r\n", ret);
     // sscanf(ret,"%*d,%d",&stat);
 
-    if (sscanf(ret, "%*d,%d", &stat) == 1) {
+    if (sscanf(ret, "%d,%d",&n,&stat) == 2) {
       return stat;
-    } else if (sscanf(ret, "%*d,%d,%*s,%*s", &stat) == 1) {
+    } else if (sscanf(ret, "%d,%d,%*s,%*s",&n, &stat) == 2) {
       return stat;
     } else {
       return -1;
@@ -137,6 +138,7 @@ int Sim7600Cellular::get_IPAddr(char *ipaddr) {
     strcpy(ipaddr, _ipaddr);
     return 1;
   }
+  strcpy(ipaddr,"0.0.0.0");
   return -1;
 }
 
@@ -229,6 +231,48 @@ bool Sim7600Cellular::mqtt_connect(char *broker_ip, char *usr, char *pwd,
     bmqtt_cnt = true;
   }
   return bmqtt_cnt;
+}
+
+int Sim7600Cellular::mqtt_connect_stat() {
+  char _ret[128];
+  if (_atc->send("AT+CMQTTCONNECT?") &&
+      _atc->scanf("+CMQTTCONNECT: %[^\n]\r\n", _ret)) {
+    // strcpy(cpsi, _ipaddr);
+
+    int nret = 0,keepAlive=0,clean=0;
+    // 0,"tcp://188.166.189.39:1883",60,0,"IoTdevices","devices@iot"
+    if (sscanf(_ret, "%d,\"%*[^\"]\",%d,%d,\"%*[^\"]\",\"%*[^\"]\"", &nret,&keepAlive,&clean) == 3) {
+
+    //   sprintf(ret_msg, "+CMQTTCONNECT: %s", _ret);
+      return 1;
+
+    } else {
+    //   strcpy(ret_msg, "Disconnected\r\n");
+      return 0;
+    }
+  }
+  return -1;
+}
+
+int Sim7600Cellular::mqtt_connect_stat(char *ret_msg) {
+  char _ret[128];
+  if (_atc->send("AT+CMQTTCONNECT?") &&
+      _atc->scanf("+CMQTTCONNECT: %[^\n]\r\n", _ret)) {
+    // strcpy(cpsi, _ipaddr);
+
+    int nret = 0,keepAlive=0,clean=0;
+    // 0,"tcp://188.166.189.39:1883",60,0,"IoTdevices","devices@iot"
+    if (sscanf(_ret, "%d,\"%*[^\"]\",%d,%d,\"%*[^\"]\",\"%*[^\"]\"", &nret,&keepAlive,&clean) == 3) {
+
+      sprintf(ret_msg, "+CMQTTCONNECT: %s", _ret);
+      return 1;
+
+    } else {
+      strcpy(ret_msg, "Disconnected\r\n");
+      return 0;
+    }
+  }
+  return -1;
 }
 
 bool Sim7600Cellular::mqtt_publish(char topic[64], char payload[256], int qos,

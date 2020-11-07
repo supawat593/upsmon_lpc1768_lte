@@ -25,6 +25,8 @@ public:
   bool mqtt_start();
   bool mqtt_accquire_client(char *clientName);
   bool mqtt_connect(char *broker_ip, char *usr, char *pwd, int port = 1883);
+   int mqtt_connect_stat(void);
+  int mqtt_connect_stat(char *ret_msg);
   bool mqtt_publish(char topic[64], char payload[256], int qos = 1,
                     int interval_s = 60);
 
