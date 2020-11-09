@@ -42,7 +42,7 @@ ATCmdParser *xtc232;
 
 DigitalOut vrf_en(MDM_VRF_EN_PIN, 0);
 DigitalOut mdm_rst(MDM_RST_PIN);
-DigitalOut mdm_pwr(MDM_PWR_PIN);
+DigitalOut mdm_pwr(MDM_PWR_PIN, 1);
 DigitalOut mdm_flight(MDM_FLIGHT_PIN);
 DigitalIn mdm_status(MDM_STATUS_PIN);
 
@@ -106,6 +106,7 @@ uint8_t read_dipsw() { return (~dipsw.read()) & 0x0f; }
 
 void usb_passthrough() {
   printf("start usb_passthrough Thread...\r\n");
+  char str_usb_ret[128];
   USBSerial pc2;
 
   uint8_t a, b;
@@ -126,8 +127,8 @@ void usb_passthrough() {
         ret_usb_mail.free(xmail);
       }
 
-      //   if (is_idle_rs232) {
-      while (is_idle_rs232) {
+      if (is_idle_rs232) {
+        //   while (is_idle_rs232) {
 
         if (pc2.readable()) {
           a = pc2.getc();
@@ -135,8 +136,11 @@ void usb_passthrough() {
         }
         if (rs232.readable()) {
 
-          b = rs232.read(&b, 1);
-          pc2.write(&b, 1);
+        //   b = rs232.read(&b, 1);
+        //   pc2.write(&b, 1);
+          memset(str_usb_ret,0,128);
+          read_xtc_to_char(str_usb_ret, 250, '\n');
+          pc2.printf("%s\n",str_usb_ret);
         }
       }
     }
@@ -408,29 +412,6 @@ int main() {
 
       mail_box.free(mail);
     }
-
-    // osEvent evt = mail_box.get(100);
-    // // osEvent evt = mail_box.get();
-    // if (evt.status == osEventMail) {
-    //   mail_t *mail = (mail_t *)evt.value.p;
-    //   printf("utc : %d" CRLF, mail->utc);
-    //   printf("cmd : %s" CRLF, mail->cmd);
-    //   printf("resp : %s" CRLF, mail->resp);
-
-    //   memset(str_topic, 0, 64);
-    //   memset(mqtt_msg, 0, 256);
-
-    //   sprintf(str_topic, "UPSMON/%s", imei);
-    //   sprintf(mqtt_msg, payload_pattern, imei, mail->utc, model_Name,
-    //   site_ID,
-    //           mail->cmd, mail->resp);
-
-    //   if (bmqtt_cnt) {
-    //     modem->mqtt_publish(str_topic, mqtt_msg);
-    //   }
-
-    //   mail_box.free(mail);
-    // }
 
     // if ((tme1.read() - last_tme_check_NW) > 55.0) {
     if (((unsigned int)rtc_read() - last_rtc_check_NW) > 55) {
