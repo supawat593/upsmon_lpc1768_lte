@@ -14,6 +14,7 @@ public:
   int set_creg(int n);
   int get_creg();
   bool set_full_FUNCTION();
+  int get_revID(char *revid);
   int get_IMEI(char *simei);
   int get_ICCID(char *ciccid);
 
@@ -21,6 +22,7 @@ public:
   int get_cpsi(char *cpsi);
   int set_tz_update(int en);
   int dns_resolve(char *src, char *dst);
+  int ping_dstNW(char* dst,int nrty=4,int p_size=64,int dest_type=1);
 
   bool mqtt_start();
   bool mqtt_accquire_client(char *clientName);
@@ -33,6 +35,8 @@ public:
 private:
   ATCmdParser *_atc;
   BufferedSerial *serial;
+
+  void printHEX(unsigned char *msg, unsigned int len);
 };
 
 #endif

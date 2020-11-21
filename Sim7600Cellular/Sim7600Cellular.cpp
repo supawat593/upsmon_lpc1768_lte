@@ -1,4 +1,5 @@
 #include "Sim7600Cellular.h"
+#include <cstdio>
 
 // extern ATCmdParser *_parser;
 
@@ -7,6 +8,26 @@ Sim7600Cellular::Sim7600Cellular(ATCmdParser *_parser) : _atc(_parser) {}
 Sim7600Cellular::Sim7600Cellular(PinName tx, PinName rx) {
   serial = new BufferedSerial(tx, rx, 115200);
   _atc = new ATCmdParser(serial, "\r\n", 256, 8000);
+}
+
+void Sim7600Cellular::printHEX(unsigned char *msg, unsigned int len) {
+
+  printf(
+      "\r\n>>>>>------------------- printHEX -------------------------<<<<<");
+  printf("\r\nAddress :  0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F");
+  printf(
+      "\r\n----------------------------------------------------------------");
+
+  unsigned int k = 0;
+  for (unsigned int j = 0; j < len; j++) {
+    if ((j % 16) == 0) {
+      printf("\r\n0x%04X0 : ", k);
+      k++;
+    }
+    printf("%02X ", (unsigned)msg[j]);
+  }
+  printf("\r\n----------------------------------------------------------------"
+         "\r\n");
 }
 
 bool Sim7600Cellular::check_modem_status(int rty) {
@@ -76,7 +97,7 @@ int Sim7600Cellular::set_creg(int n) {
 }
 
 int Sim7600Cellular::get_creg() {
-  int n=0;
+  int n = 0;
   int stat = 0;
   char ret[20];
 
@@ -84,9 +105,9 @@ int Sim7600Cellular::get_creg() {
     printf("pattern found +CREG: %s\r\n", ret);
     // sscanf(ret,"%*d,%d",&stat);
 
-    if (sscanf(ret, "%d,%d",&n,&stat) == 2) {
+    if (sscanf(ret, "%d,%d", &n, &stat) == 2) {
       return stat;
-    } else if (sscanf(ret, "%d,%d,%*s,%*s",&n, &stat) == 2) {
+    } else if (sscanf(ret, "%d,%d,%*s,%*s", &n, &stat) == 2) {
       return stat;
     } else {
       return -1;
@@ -109,6 +130,16 @@ bool Sim7600Cellular::set_full_FUNCTION() {
     bcfun = true;
   }
   return bcops && bcfun;
+}
+
+int Sim7600Cellular::get_revID(char *revid){
+    char _revid[20];
+  if (_atc->send("AT+CGMR") && _atc->scanf("+CGMR: %[^\n]\r\n", _revid)) {
+    printf("+CGMR: %s\r\n", _revid);
+    strcpy(revid, _revid);
+    return 1;
+  }
+  return -1;
 }
 
 int Sim7600Cellular::get_IMEI(char *simei) {
@@ -138,7 +169,7 @@ int Sim7600Cellular::get_IPAddr(char *ipaddr) {
     strcpy(ipaddr, _ipaddr);
     return 1;
   }
-  strcpy(ipaddr,"0.0.0.0");
+  strcpy(ipaddr, "0.0.0.0");
   return -1;
 }
 
@@ -197,6 +228,78 @@ int Sim7600Cellular::dns_resolve(char *src, char *dst) {
   }
 }
 
+int Sim7600Cellular::ping_dstNW(char *dst, int nrty, int p_size,
+                                int dest_type) {
+
+  printf("\r\n-------- uping_dstNW()!!! -------->  [%s]\r\n", dst);
+
+  char cping[100];
+
+  sprintf(cping, "AT+CPING=\"%s\",%d,%d,%d,1000,10000,255", dst, dest_type,
+          nrty, p_size);
+  //   printf("CMD : %s\r\n", cping);
+
+  _atc->set_timeout(12000);
+  _atc->flush();
+
+  int len = 64 * nrty;
+  char pbuf[len];
+  memset(pbuf, 0, len);
+
+  if (_atc->send(cping) && _atc->recv("OK")) {
+
+    _atc->read(pbuf, len);
+    // printHEX((unsigned char *)pbuf, len);
+    // printf("pbuf = %s\r\n", pbuf);
+  }
+
+  _atc->set_timeout(8000);
+
+  int st = 0, end;
+  //   char end_text[] = {0x0d, 0x0a, 0x00, 0x00};
+  char end_text[] = {0x0d, 0x0a};
+
+  while ((strncmp(&pbuf[st], "+CPING: 3", 9) != 0) && (st < len)) {
+    st++;
+  }
+
+  end = st;
+  while ((strncmp(&pbuf[end], end_text, 2) != 0) && (end < len)) {
+    end++;
+  }
+
+    // printf("st=%d end=%d\r\n", st, end);
+
+  char res_ping[end - st + 1];
+  memset(res_ping, 0, end - st + 1);
+  memcpy(&res_ping, &pbuf[st], end - st);
+  printf("res_ping = %s\r\n", res_ping);
+
+  int num_sent = nrty, num_recv = 0, num_lost = 0, min_rtt = 0, max_rtt = 0,
+      avg_rtt = 0;
+
+  sscanf(res_ping, "+CPING: 3,%d,%d,%d,%d,%d,%d", &num_sent, &num_recv,
+         &num_lost, &min_rtt, &max_rtt, &avg_rtt);
+
+  printf("min=%d max=%d avg=%d\r\n", min_rtt, max_rtt, avg_rtt);
+  if (num_sent == num_recv) {
+    printf("ping =>  %s  [OK] rtt = %d ms.\r\n", dst, avg_rtt);
+    printf("---------------------------------------------\r\n");
+
+    // free(pmask);  //for using with pointer
+
+    return avg_rtt;
+  } else {
+    printf("ping => %s [Fail]\r\n", dst);
+    printf("---------------------------------------------\r\n");
+    // return false;
+
+    // free(pmask);	//for using with pointer
+
+    return 9999;
+  }
+}
+
 bool Sim7600Cellular::mqtt_start() {
   bool bmqtt_start = false;
   if (_atc->send("AT+CMQTTSTART") && _atc->recv("OK") &&
@@ -239,15 +342,16 @@ int Sim7600Cellular::mqtt_connect_stat() {
       _atc->scanf("+CMQTTCONNECT: %[^\n]\r\n", _ret)) {
     // strcpy(cpsi, _ipaddr);
 
-    int nret = 0,keepAlive=0,clean=0;
+    int nret = 0, keepAlive = 0, clean = 0;
     // 0,"tcp://188.166.189.39:1883",60,0,"IoTdevices","devices@iot"
-    if (sscanf(_ret, "%d,\"%*[^\"]\",%d,%d,\"%*[^\"]\",\"%*[^\"]\"", &nret,&keepAlive,&clean) == 3) {
+    if (sscanf(_ret, "%d,\"%*[^\"]\",%d,%d,\"%*[^\"]\",\"%*[^\"]\"", &nret,
+               &keepAlive, &clean) == 3) {
 
-    //   sprintf(ret_msg, "+CMQTTCONNECT: %s", _ret);
+      //   sprintf(ret_msg, "+CMQTTCONNECT: %s", _ret);
       return 1;
 
     } else {
-    //   strcpy(ret_msg, "Disconnected\r\n");
+      //   strcpy(ret_msg, "Disconnected\r\n");
       return 0;
     }
   }
@@ -260,9 +364,10 @@ int Sim7600Cellular::mqtt_connect_stat(char *ret_msg) {
       _atc->scanf("+CMQTTCONNECT: %[^\n]\r\n", _ret)) {
     // strcpy(cpsi, _ipaddr);
 
-    int nret = 0,keepAlive=0,clean=0;
+    int nret = 0, keepAlive = 0, clean = 0;
     // 0,"tcp://188.166.189.39:1883",60,0,"IoTdevices","devices@iot"
-    if (sscanf(_ret, "%d,\"%*[^\"]\",%d,%d,\"%*[^\"]\",\"%*[^\"]\"", &nret,&keepAlive,&clean) == 3) {
+    if (sscanf(_ret, "%d,\"%*[^\"]\",%d,%d,\"%*[^\"]\",\"%*[^\"]\"", &nret,
+               &keepAlive, &clean) == 3) {
 
       sprintf(ret_msg, "+CMQTTCONNECT: %s", _ret);
       return 1;

@@ -21,14 +21,20 @@
 char mqtt_broker_ip[] = "188.166.189.39";
 // char mqtt_broker[] = "trueiot.io";
 // int mqtt_port = 1883;
-// char mqtt_usr[] = "IoTdevices";
-// char mqtt_pwd[] = "devices@iot";
+char mqtt_usr[] = "IoTdevices";
+char mqtt_pwd[] = "devices@iot";
 // char model_Name[] = "Chuphotic1";
 // char site_ID[] = "1234567890";
 
+// char init_cfg_pattern[] = {
+//     "%*[^\n]\nBroker SRV: \"%[^\"]\"\nPort: %d\nUSR: \"%[^\"]\"\nPWD: "
+//     "\"%[^\"]\"\nTopic: \"%[^\"]\"\nCommand: [%[^]]]\nModel:
+//     \"%[^\"]\"\nSite_ID: "
+//     "\"%[^\"]\"\n%*s"};
+
 char init_cfg_pattern[] = {
-    "%*[^\n]\nBroker SRV: \"%[^\"]\"\nPort: %d\nUSR: \"%[^\"]\"\nPWD: "
-    "\"%[^\"]\"\nTopic: \"%[^\"]\"\nCommand: [%[^]]]\nModel: \"%[^\"]\"\nSite_ID: "
+    "%*[^\n]\nBroker: \"%[^\"]\"\nPort: %d\nTopic: \"%[^\"]\"\nCommand: "
+    "[%[^]]]\nModel: \"%[^\"]\"\nSite_ID: "
     "\"%[^\"]\"\n%*s"};
 
 char payload_pattern[] = "{\"imei\":%s,\"utc\":%u,\"model\":\"%s\",\"site_ID\":"
@@ -53,3 +59,5 @@ typedef struct {
   char model[32];
   char siteID[32];
 } init_script_t;
+
+typedef enum { SEARCHING = 0, IDLE, SENDING } netstat_mode;
