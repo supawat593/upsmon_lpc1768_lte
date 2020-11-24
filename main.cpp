@@ -66,6 +66,10 @@ unsigned int last_ntp_sync = 0;
 unsigned int last_rtc_check_NW = 0;
 // float last_tme_check_NW = 0.0;
 
+char revID[20];
+bool mdmOK = false;
+bool mdmAtt = false;
+
 char imei[16];
 char iccid[20];
 
@@ -135,7 +139,9 @@ void blip_netstat(DigitalOut *led) {
 }
 
 void usb_passthrough() {
+  printf("\r\n-------------------------------\r\n");
   printf("start usb_passthrough Thread...\r\n");
+  printf("-------------------------------\r\n");
   char str_usb_ret[128];
   USBSerial pc2;
 
@@ -197,9 +203,9 @@ void capture_thread_routine() {
   }
 
   while (true) {
-    printf("*********************************" CRLF);
-    printf("capture---> timestamp: %d" CRLF, (unsigned int)rtc_read());
-    printf("*********************************" CRLF);
+    // printf("*********************************" CRLF);
+    // printf("capture---> timestamp: %d" CRLF, (unsigned int)rtc_read());
+    // printf("*********************************" CRLF);
 
     is_idle_rs232 = false;
 
@@ -215,8 +221,8 @@ void capture_thread_routine() {
       // strcpy(mail->resp, dummy_msg);
       xtc232->send(mail->cmd);
 
-      read_xtc_to_char(ret_rs232, 128, '\n');
-      //   strcpy(ret_rs232, str_ret[j]);
+        read_xtc_to_char(ret_rs232, 128, '\n');
+    //   strcpy(ret_rs232, str_ret[j]);
 
       if (strlen(ret_rs232) > 0) {
         strcpy(mail->resp, ret_rs232);
@@ -349,10 +355,6 @@ int main() {
     ;
   printf("SIM7600 Status: Ready\r\n");
 
-  bool mdmOK = false;
-  bool mdmAtt = false;
-  char revID[20];
-
   mdmOK = modem->check_modem_status();
 
   netstat_thread.start(callback(blip_netstat, &netstat));
@@ -389,6 +391,7 @@ int main() {
 
   ntp_sync();
   last_ntp_sync = (unsigned int)rtc_read();
+  last_rtc_check_NW = (unsigned int)rtc_read();
 
   bmqtt_start = modem->mqtt_start();
 
@@ -406,14 +409,9 @@ int main() {
                                     init_script.port);
   }
 
-  last_rtc_check_NW = (unsigned int)rtc_read();
-  // last_tme_check_NW = tme1.read();
-
   capture_thread.start(callback(capture_thread_routine));
   blink_thread.start(mbed::callback(blink_routine));
-
   usb_thread.start(callback(usb_passthrough));
-
   pwake.fall(&fall_wake);
 
   while (true) {
@@ -444,6 +442,7 @@ int main() {
 
       if (bmqtt_cnt) {
         modem->mqtt_publish(str_topic, mqtt_msg);
+        printf("< ------------------------------------------------ >" CRLF);
       }
       mail_box.free(mail);
     }
@@ -457,8 +456,8 @@ int main() {
       printf("timestamp : %d\r\n", (unsigned int)rtc_read());
 
       //   if (modem->get_creg() == 1) {
-      if (modem->check_attachNW()) {
-        modem->get_creg();
+      if (modem->check_attachNW()&&(modem->get_creg()==1)) {
+        // modem->get_creg();
 
         char msg[32];
         if (_parser->send("AT+CCLK?") &&
@@ -488,7 +487,25 @@ int main() {
           last_ntp_sync = (unsigned int)rtc_read();
         }
 
-        if (modem->mqtt_connect_stat() < 1) {
+        if (modem->mqtt_isdisconnect() < 1) {
+          // if (modem->mqtt_connect_stat() < 1) {
+          char dns_ip[16];
+          //   if (modem->dns_resolve(mqtt_broker, dns_ip) < 0) {
+          if (modem->dns_resolve(init_script.broker, dns_ip) < 0) {
+            memset(dns_ip, 0, 16);
+            strcpy(dns_ip, mqtt_broker_ip);
+          }
+
+          if (modem->mqtt_release()) {
+            if (modem->mqtt_stop()) {
+              bmqtt_start = false;
+            }
+          }
+        }
+
+        if (!bmqtt_start) {
+          bmqtt_start = modem->mqtt_start();
+          modem->mqtt_accquire_client(imei);
           char dns_ip[16];
           //   if (modem->dns_resolve(mqtt_broker, dns_ip) < 0) {
           if (modem->dns_resolve(init_script.broker, dns_ip) < 0) {
@@ -505,12 +522,6 @@ int main() {
           bmqtt_cnt = (bmqtt_cnt && true);
         }
 
-        if (!bmqtt_cnt) {
-          vrf_en = 0;
-          ThisThread::sleep_for(100ms);
-          vrf_en = 1;
-        }
-
       } else {
         netstat_led(IDLE);
         mdm_flight = 1;
@@ -518,6 +529,24 @@ int main() {
         mdm_flight = 0;
         bmqtt_cnt = false;
         printf("NW Connection Fail: On/Off Flight Mode" CRLF);
+      }
+
+      if (!modem->check_modem_status()) {
+        vrf_en = 0;
+        ThisThread::sleep_for(500ms);
+        vrf_en = 1;
+        bmqtt_start = false;
+        bmqtt_cnt = false;
+
+        while (mdm_status.read())
+          ;
+        printf("Power re-attached -> SIM7600 Status: Ready\r\n");
+        mdmOK = modem->check_modem_status();
+        if (mdmOK && modem->set_full_FUNCTION()) {
+          printf("AT Command and set full_function : OK\r\n");
+          modem->set_creg(2);
+          mdmAtt = modem->check_attachNW();
+        }
       }
     }
 
@@ -655,7 +684,7 @@ void apply_script(FILE *file) {
 
     is_script_read = true;
 
-    printf("\r\n<-------------------------------->\r\n");
+    printf("\r\n<----------------------------------->\r\n");
     printf("    broker: %s" CRLF, init_script.broker);
     printf("    port: %d" CRLF, init_script.port);
     // printf("    usr: %s" CRLF, init_script.usr);
@@ -664,7 +693,7 @@ void apply_script(FILE *file) {
     printf("    full_cmd: %s" CRLF, init_script.full_cmd);
     printf("    model: %s" CRLF, init_script.model);
     printf("    siteID: %s" CRLF, init_script.siteID);
-    printf("<-------------------------------->\r\n\n");
+    printf("<----------------------------------->\r\n\n");
   }
 
   /* the whole file is now loaded in the memory buffer. */

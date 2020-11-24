@@ -1,5 +1,6 @@
 #include "Sim7600Cellular.h"
 #include <cstdio>
+#include <cstring>
 
 // extern ATCmdParser *_parser;
 
@@ -132,8 +133,8 @@ bool Sim7600Cellular::set_full_FUNCTION() {
   return bcops && bcfun;
 }
 
-int Sim7600Cellular::get_revID(char *revid){
-    char _revid[20];
+int Sim7600Cellular::get_revID(char *revid) {
+  char _revid[20];
   if (_atc->send("AT+CGMR") && _atc->scanf("+CGMR: %[^\n]\r\n", _revid)) {
     printf("+CGMR: %s\r\n", _revid);
     strcpy(revid, _revid);
@@ -268,7 +269,7 @@ int Sim7600Cellular::ping_dstNW(char *dst, int nrty, int p_size,
     end++;
   }
 
-    // printf("st=%d end=%d\r\n", st, end);
+  // printf("st=%d end=%d\r\n", st, end);
 
   char res_ping[end - st + 1];
   memset(res_ping, 0, end - st + 1);
@@ -310,6 +311,26 @@ bool Sim7600Cellular::mqtt_start() {
   return bmqtt_start;
 }
 
+bool Sim7600Cellular::mqtt_stop() {
+  bool bmqtt_start = false;
+  if (_atc->send("AT+CMQTTSTOP") && _atc->recv("+CMQTTSTOP: 0") &&
+      _atc->recv("OK")) {
+    printf("mqtt stop --> Completed\r\n");
+    bmqtt_start = true;
+  }
+  return bmqtt_start;
+}
+
+bool Sim7600Cellular::mqtt_release(int clientindex) {
+  char cmd[32];
+  sprintf(cmd, "AT+CMQTTREL=%d", clientindex);
+  if (_atc->send(cmd) && _atc->recv("OK")) {
+    printf("Release mqtt client : index %d\r\n", clientindex);
+    return true;
+  }
+  return false;
+}
+
 bool Sim7600Cellular::mqtt_accquire_client(char *clientName) {
   char cmd[128];
   sprintf(cmd, "AT+CMQTTACCQ=0,\"%s\"", clientName);
@@ -321,19 +342,28 @@ bool Sim7600Cellular::mqtt_accquire_client(char *clientName) {
 }
 
 bool Sim7600Cellular::mqtt_connect(char *broker_ip, char *usr, char *pwd,
-                                   int port) {
+                                   int port, int clientindex) {
   char cmd[128];
-  bool bmqtt_cnt = false;
+  int index = 0;
+  int err = 0;
+  //   bool bmqtt_cnt = false;
   sprintf(cmd, "AT+CMQTTCONNECT=0,\"tcp://%s:%d\",60,0,\"%s\",\"%s\"",
           broker_ip, port, usr, pwd);
   printf("connect cmd -> %s\r\n", cmd);
-  if (_atc->send(cmd) && _atc->recv("OK") && _atc->recv("+CMQTTCONNECT: 0,0")) {
+  if (_atc->send(cmd) && _atc->recv("OK") &&
+      _atc->recv("+CMQTTCONNECT: %d,%d\r\n", &index, &err)) {
     // if (_parser->send(cmd)) {
     // printf("connect cmd -> %s" CRLF, cmd);
-    printf("MQTT connected\r\n");
-    bmqtt_cnt = true;
+
+    if ((index == clientindex) && (err == 0)) {
+      printf("MQTT connected\r\n");
+      return true;
+    }
+    printf("MQTT connect : index=%d err=%d\r\n", index, err);
+    return false;
   }
-  return bmqtt_cnt;
+  printf("MQTT connect : Pattern Fail!\r\n");
+  return false;
 }
 
 int Sim7600Cellular::mqtt_connect_stat() {
@@ -374,6 +404,43 @@ int Sim7600Cellular::mqtt_connect_stat(char *ret_msg) {
 
     } else {
       strcpy(ret_msg, "Disconnected\r\n");
+      return 0;
+    }
+  }
+  return -1;
+}
+
+int Sim7600Cellular::mqtt_isdisconnect(int clientindex) {
+  char rcvbuf[64];
+  char rcv[15];
+  int disc_state = 0;
+  int len = 0;
+  sprintf(rcv, "+CMQTTDISC: %d", clientindex);
+  len = strlen(rcv);
+  _atc->set_timeout(2000);
+  _atc->flush();
+  _atc->send("AT+CMQTTDISC?");
+  //   if (_atc->send("AT+CMQTTDISC?")) {
+  _atc->read(rcvbuf, 64);
+  _atc->set_timeout(8000);
+  //   printHEX((unsigned char *)rcvbuf, 64);
+
+  int st = 0;
+  while ((strncmp(&rcvbuf[st], rcv, len) != 0) && (st < 64)) {
+    st++;
+  }
+
+  if (st < 64) {
+    char sub_ret[64 - st];
+    memset(sub_ret, 0, 64 - st);
+    memcpy(&sub_ret, &rcvbuf[st], 64 - st);
+    sscanf(sub_ret, "+CMQTTDISC: %*d,%d\r\n", &disc_state);
+
+    if (!disc_state) {
+      printf("MQTT : Connection\r\n");
+      return 1;
+    } else {
+      printf("MQTT : Disconnection\r\n");
       return 0;
     }
   }
