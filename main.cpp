@@ -79,7 +79,6 @@ char mqtt_msg[256];
 
 // char usb_ret[128];
 volatile bool is_usb_cnnt = false;
-volatile bool is_msg_usb = false;
 volatile char is_idle_rs232 = true;
 
 // const char *str_cmd[] = {"Q1", "Q4", "QF"}; // 1phase
@@ -98,6 +97,7 @@ volatile float duty = 0.9;
 // Timer tme1;
 
 Thread blink_thread, netstat_thread, capture_thread, usb_thread;
+Mutex mutex_idle_rs232, mutex_usb_cnnt;
 
 init_script_t init_script;
 struct tm struct_tm;
@@ -109,6 +109,34 @@ void printHEX(unsigned char *msg, unsigned int len);
 int read_xtc_to_char(char *tbuf, int size, char end);
 void read_initial_script();
 void apply_script(FILE *file);
+
+bool get_idle_rs232() {
+  bool temp;
+  mutex_idle_rs232.lock();
+  temp = is_idle_rs232;
+  mutex_idle_rs232.unlock();
+  return temp;
+}
+
+void set_idle_rs232(bool temp) {
+  mutex_idle_rs232.lock();
+  is_idle_rs232 = temp;
+  mutex_idle_rs232.unlock();
+}
+
+bool get_usb_cnnt() {
+  bool temp;
+  mutex_usb_cnnt.lock();
+  temp = is_usb_cnnt;
+  mutex_usb_cnnt.unlock();
+  return temp;
+}
+
+void set_usb_cnnt(bool temp) {
+  mutex_usb_cnnt.lock();
+  is_usb_cnnt = temp;
+  mutex_usb_cnnt.unlock();
+}
 
 uint8_t read_dipsw() { return (~dipsw.read()) & 0x0f; }
 
@@ -150,9 +178,8 @@ void usb_passthrough() {
   while (true) {
 
     while (pc2.connected()) {
-      is_usb_cnnt = true;
-      //   if (is_msg_usb) {
-      //     is_msg_usb = false;
+      //   is_usb_cnnt = true;
+      set_usb_cnnt(true);
       //     pc2.printf("%s\n", usb_ret);
       //   }
 
@@ -163,7 +190,8 @@ void usb_passthrough() {
         ret_usb_mail.free(xmail);
       }
 
-      if (is_idle_rs232) {
+      if (get_idle_rs232()) {
+        //   if (is_idle_rs232) {
         //   while (is_idle_rs232) {
 
         if (pc2.readable()) {
@@ -175,13 +203,14 @@ void usb_passthrough() {
           //   b = rs232.read(&b, 1);
           //   pc2.write(&b, 1);
           memset(str_usb_ret, 0, 128);
-          read_xtc_to_char(str_usb_ret, 250, '\n');
+          read_xtc_to_char(str_usb_ret, 128, '\n');
           pc2.printf("%s\n", str_usb_ret);
         }
       }
     }
 
-    is_usb_cnnt = false;
+    // is_usb_cnnt = false;
+    set_usb_cnnt(false);
     ThisThread::sleep_for(chrono::milliseconds(3000));
   }
 }
@@ -207,7 +236,8 @@ void capture_thread_routine() {
     // printf("capture---> timestamp: %d" CRLF, (unsigned int)rtc_read());
     // printf("*********************************" CRLF);
 
-    is_idle_rs232 = false;
+    // is_idle_rs232 = false;
+    set_idle_rs232(false);
 
     for (int j = 0; j < n_cmd; j++) {
       mail_t *mail = mail_box.try_alloc();
@@ -221,8 +251,8 @@ void capture_thread_routine() {
       // strcpy(mail->resp, dummy_msg);
       xtc232->send(mail->cmd);
 
-        read_xtc_to_char(ret_rs232, 128, '\n');
-    //   strcpy(ret_rs232, str_ret[j]);
+    //   read_xtc_to_char(ret_rs232, 128, '\n');
+        strcpy(ret_rs232, str_ret[j]);
 
       if (strlen(ret_rs232) > 0) {
         strcpy(mail->resp, ret_rs232);
@@ -230,14 +260,13 @@ void capture_thread_routine() {
         // memset(usb_ret, 0, 128);
         // strcpy(usb_ret, ret_rs232);
 
-        is_msg_usb = true;
-
         // <---------- mail for usb return msg ------------->
         mail_t *xmail = ret_usb_mail.try_alloc();
         memset(xmail->resp, 0, 128);
         strcpy(xmail->resp, mail->resp);
 
-        if (is_usb_cnnt) {
+        if (get_usb_cnnt()) {
+          // if (is_usb_cnnt) {
           ret_usb_mail.put(xmail);
         } else {
           ret_usb_mail.free(xmail);
@@ -253,7 +282,8 @@ void capture_thread_routine() {
     }
 
     //   mail_box.put(mail);
-    is_idle_rs232 = true;
+    // is_idle_rs232 = true;
+    set_idle_rs232(true);
 
     ThisThread::sleep_for(chrono::minutes(read_dipsw()));
   }
@@ -347,7 +377,7 @@ int main() {
   modem = new Sim7600Cellular(_parser);
   // modem=new Sim7600Cellular(PTD3,PTD2);
 
-  xtc232 = new ATCmdParser(&rs232, "\n", 128, 1000);
+  xtc232 = new ATCmdParser(&rs232, "\n", 128, 2000);
 
   vrf_en = 1;
 
@@ -456,7 +486,7 @@ int main() {
       printf("timestamp : %d\r\n", (unsigned int)rtc_read());
 
       //   if (modem->get_creg() == 1) {
-      if (modem->check_attachNW()&&(modem->get_creg()==1)) {
+      if (modem->check_attachNW() && (modem->get_creg() == 1)) {
         // modem->get_creg();
 
         char msg[32];
@@ -489,6 +519,7 @@ int main() {
 
         if (modem->mqtt_isdisconnect() < 1) {
           // if (modem->mqtt_connect_stat() < 1) {
+          bmqtt_cnt = false;
           char dns_ip[16];
           //   if (modem->dns_resolve(mqtt_broker, dns_ip) < 0) {
           if (modem->dns_resolve(init_script.broker, dns_ip) < 0) {
@@ -499,11 +530,17 @@ int main() {
           if (modem->mqtt_release()) {
             if (modem->mqtt_stop()) {
               bmqtt_start = false;
+            } else {
+              bmqtt_start = false;
+              mdm_rst = 1;
+              ThisThread::sleep_for(500ms);
+              mdm_rst = 0;
+              printf("MQTT Stop Fail: Rebooting Modem!!!" CRLF);
             }
           }
         }
 
-        if (!bmqtt_start) {
+        if ((!bmqtt_start) && modem->check_attachNW()) {
           bmqtt_start = modem->mqtt_start();
           modem->mqtt_accquire_client(imei);
           char dns_ip[16];
