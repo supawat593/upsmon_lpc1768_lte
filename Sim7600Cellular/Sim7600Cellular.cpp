@@ -35,22 +35,42 @@ bool Sim7600Cellular::check_modem_status(int rty) {
   bool bAT_OK = false;
   _atc->set_timeout(1000);
 
-  for (int i = 0; !bAT_OK && (i < rty); i++) {
-    _atc->flush();
+  for (int i = 0; (!bAT_OK) && (i < rty); i++) {
+ 
     if (_atc->send("AT")) {
-      ThisThread::sleep_for(100ms);
+      //   ThisThread::sleep_for(100ms);
       if (_atc->recv("OK")) {
         bAT_OK = true;
-        // printf("Module SIM7600  OK\r\n");
+        printf("Module SIM7600  OK\r\n");
       } else {
         bAT_OK = false;
-        // printf("Module SIM7600  Fail : %d\r\n",i);
+        printf("Module SIM7600  Fail : %d\r\n",i);
       }
     }
   }
-
+   
   _atc->set_timeout(8000);
   return bAT_OK;
+}
+
+bool Sim7600Cellular::enable_echo(bool en) {
+    char cmd_txt[10];
+    sprintf(cmd_txt,"ATE%d",(int)en);
+    if(_atc->send(cmd_txt)&&_atc->recv("OK")){
+        if(en){
+            printf("Enable AT Echo\r\n");
+        }else{
+            printf("Disable AT Echo\r\n");
+        }
+        return true;
+    }
+    return false;
+}
+bool Sim7600Cellular::save_setting() {
+  if (_atc->send("AT&W0") && _atc->recv("OK")) {
+    return true;
+  }
+  return false;
 }
 
 bool Sim7600Cellular::check_attachNW() {
@@ -463,6 +483,7 @@ bool Sim7600Cellular::mqtt_publish(char topic[64], char payload[256], int qos,
   sprintf(cmd_pub, "AT+CMQTTPUB=0,%d,%d", qos, interval_s);
 
   printf("cmd_pub_topic= %s\r\n", cmd_pub_topic);
+  _atc->flush();
   _atc->send(cmd_pub_topic);
 
   if (_atc->recv(">")) {
@@ -473,7 +494,7 @@ bool Sim7600Cellular::mqtt_publish(char topic[64], char payload[256], int qos,
   }
 
   printf("cmd_pub_msg= %s\r\n", cmd_pub_msg);
-
+  _atc->flush();
   if (_atc->send(cmd_pub_msg) && _atc->recv(">")) {
     if ((_atc->write(payload, len_payload) == len_payload) &&
         _atc->recv("OK")) {

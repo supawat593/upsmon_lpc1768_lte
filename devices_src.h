@@ -60,4 +60,4 @@ typedef struct {
   char siteID[32];
 } init_script_t;
 
-typedef enum { SEARCHING = 0, IDLE, SENDING } netstat_mode;
+typedef enum { OFF = 0, IDLE, CONNECTED } netstat_mode;

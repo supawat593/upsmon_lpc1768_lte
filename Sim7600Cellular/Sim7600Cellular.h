@@ -9,6 +9,8 @@ public:
   Sim7600Cellular(ATCmdParser *_parser);
   Sim7600Cellular(PinName tx, PinName rx);
   bool check_modem_status(int rty = 20);
+  bool enable_echo(bool en);
+  bool save_setting();
   bool check_attachNW();
   int get_csq(int *power, int *ber);
   int set_creg(int n);
