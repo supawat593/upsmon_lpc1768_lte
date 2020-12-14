@@ -36,7 +36,7 @@ bool Sim7600Cellular::check_modem_status(int rty) {
   _atc->set_timeout(1000);
 
   for (int i = 0; (!bAT_OK) && (i < rty); i++) {
- 
+
     if (_atc->send("AT")) {
       //   ThisThread::sleep_for(100ms);
       if (_atc->recv("OK")) {
@@ -44,27 +44,27 @@ bool Sim7600Cellular::check_modem_status(int rty) {
         printf("Module SIM7600  OK\r\n");
       } else {
         bAT_OK = false;
-        printf("Module SIM7600  Fail : %d\r\n",i);
+        printf("Module SIM7600  Fail : %d\r\n", i);
       }
     }
   }
-   
+
   _atc->set_timeout(8000);
   return bAT_OK;
 }
 
 bool Sim7600Cellular::enable_echo(bool en) {
-    char cmd_txt[10];
-    sprintf(cmd_txt,"ATE%d",(int)en);
-    if(_atc->send(cmd_txt)&&_atc->recv("OK")){
-        if(en){
-            printf("Enable AT Echo\r\n");
-        }else{
-            printf("Disable AT Echo\r\n");
-        }
-        return true;
+  char cmd_txt[10];
+  sprintf(cmd_txt, "ATE%d", (int)en);
+  if (_atc->send(cmd_txt) && _atc->recv("OK")) {
+    if (en) {
+      printf("Enable AT Echo\r\n");
+    } else {
+      printf("Disable AT Echo\r\n");
     }
-    return false;
+    return true;
+  }
+  return false;
 }
 bool Sim7600Cellular::save_setting() {
   if (_atc->send("AT&W0") && _atc->recv("OK")) {
@@ -153,6 +153,14 @@ bool Sim7600Cellular::set_full_FUNCTION() {
   return bcops && bcfun;
 }
 
+bool Sim7600Cellular::set_min_cFunction() {
+  if (_atc->send("AT+CFUN=0") && _atc->recv("OK")) {
+    printf("set_min_cFunction---> AT+CFUN=0\r\n");
+    return true;
+  }
+  return false;
+}
+
 int Sim7600Cellular::get_revID(char *revid) {
   char _revid[20];
   if (_atc->send("AT+CGMR") && _atc->scanf("+CGMR: %[^\n]\r\n", _revid)) {
@@ -178,6 +186,51 @@ int Sim7600Cellular::get_ICCID(char *ciccid) {
   if (_atc->send("AT+CICCID") && _atc->scanf("+ICCID: %[^\n]\r\n", _iccid)) {
     // printf("iccid= %s\r\n", _iccid);
     strcpy(ciccid, _iccid);
+    return 1;
+  }
+  return -1;
+}
+
+int Sim7600Cellular::set_pref_Mode(int mode) {
+  char _cmd[20];
+  sprintf(_cmd, "AT+CNMP=%d", mode);
+  _atc->set_timeout(12000);
+  if (_atc->send(_cmd) && _atc->recv("OK")) {
+    printf("set Preferred Mode -> AT+CNMP=%d\r\n", mode);
+    _atc->set_timeout(8000);
+    return 1;
+  }
+
+  _atc->set_timeout(8000);
+  return -1;
+}
+
+int Sim7600Cellular::get_pref_Mode() {
+  int ret = 0;
+  if (_atc->send("AT+CNMP?") && _atc->recv("+CNMP: %d\r\n", &ret)&&_atc->recv("OK")) {
+    printf("+CNMP: %d\r\n", ret);
+    // strcpy(ciccid, _iccid);
+    return ret;
+  }
+  return -1;
+}
+
+int Sim7600Cellular::set_acq_order(int a1, int a2, int a3, int a4, int a5,
+                                   int a6) {
+  char _cmd[30];
+  sprintf(_cmd, "AT+CNAOP=7,%d,%d,%d,%d,%d,%d", a1, a2, a3, a4, a5, a6);
+  if (_atc->send(_cmd) && _atc->recv("OK")) {
+    printf("set_acq_order -> %s\r\n", _cmd);
+    // strcpy(ciccid, _iccid);
+    return 1;
+  }
+  return -1;
+}
+int Sim7600Cellular::get_acq_order() {
+  char ret[30];
+  if (_atc->send("AT+CNAOP?") && _atc->scanf("+CNAOP: %[^\n]\r\n", ret)) {
+    printf("+CNAOP: %s\r\n", ret);
+    // strcpy(ciccid, _iccid);
     return 1;
   }
   return -1;

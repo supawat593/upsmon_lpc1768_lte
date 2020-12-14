@@ -5,6 +5,9 @@
 #define MDM_PWR_PIN PTB2
 #define MDM_FLIGHT_PIN PTC10
 #define MDM_STATUS_PIN PTC9
+#define MDM_RI_PIN PTD1
+#define MDM_DTR_PIN PTD4
+
 
 #define ECARD_TX_PIN PTB17
 #define ECARD_RX_PIN PTB16

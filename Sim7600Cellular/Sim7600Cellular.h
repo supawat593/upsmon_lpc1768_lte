@@ -16,9 +16,15 @@ public:
   int set_creg(int n);
   int get_creg();
   bool set_full_FUNCTION();
+  bool set_min_cFunction();
   int get_revID(char *revid);
   int get_IMEI(char *simei);
   int get_ICCID(char *ciccid);
+
+  int set_pref_Mode(int mode=2);
+  int get_pref_Mode();
+  int set_acq_order(int a1=9,int a2=5,int a3=3,int a4=11,int a5=2,int a6=4);
+  int get_acq_order();
 
   int get_IPAddr(char *ipaddr);
   int get_cpsi(char *cpsi);

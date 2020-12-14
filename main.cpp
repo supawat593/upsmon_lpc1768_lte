@@ -41,11 +41,15 @@ Sim7600Cellular *modem;
 BufferedSerial rs232(ECARD_TX_PIN, ECARD_RX_PIN, 2400);
 ATCmdParser *xtc232;
 
-DigitalOut vrf_en(MDM_VRF_EN_PIN, 0);
+DigitalOut vrf_en(MDM_VRF_EN_PIN);
 DigitalOut mdm_rst(MDM_RST_PIN);
 DigitalOut mdm_pwr(MDM_PWR_PIN, 1);
 DigitalOut mdm_flight(MDM_FLIGHT_PIN);
+// DigitalOut mdm_flight(MDM_FLIGHT_PIN, 1);
 DigitalIn mdm_status(MDM_STATUS_PIN);
+
+DigitalOut mdm_dtr(MDM_DTR_PIN);
+DigitalIn mdm_ri(MDM_RI_PIN);
 
 InterruptIn pwake(WDT_WAKE_PIN);
 DigitalOut pdone(WDT_DONE_PIN, 0);
@@ -102,6 +106,13 @@ Mutex mutex_idle_rs232, mutex_usb_cnnt;
 init_script_t init_script;
 struct tm struct_tm;
 
+typedef struct {
+  int led_stat;
+} netstat_t;
+
+MemoryPool<netstat_t, 2> netstat_mpool;
+Queue<netstat_t, 2> netstat_queue;
+
 Mail<mail_t, 16> mail_box;
 Mail<mail_t, 8> ret_usb_mail;
 
@@ -141,28 +152,59 @@ void set_usb_cnnt(bool temp) {
 uint8_t read_dipsw() { return (~dipsw.read()) & 0x0f; }
 
 void netstat_led(netstat_mode inp = IDLE) {
+  netstat_t *net_queue = netstat_mpool.try_alloc();
   switch (inp) {
+    //   case IDLE:
+    //     period_ms = 400;
+    //     duty = 0.95;
+    //     break;
+    //   case CONNECTED:
+    //     period_ms = 400;
+    //     duty = 0.5;
+    //     break;
+    //   default:
+    //     period_ms = 500;
+    //     duty = 0.05;
+    //   }
   case IDLE:
-    period_ms = 400;
-    duty = 0.95;
+    net_queue->led_stat = 1;
+    netstat_queue.try_put(net_queue);
     break;
   case CONNECTED:
-    period_ms = 400;
-    duty = 0.5;
+    net_queue->led_stat = 2;
+    netstat_queue.try_put(net_queue);
     break;
   default:
-    period_ms = 500;
-    duty = 0.05;
+    net_queue->led_stat = 0;
+    netstat_queue.try_put(net_queue);
   }
 }
 
 void blip_netstat(DigitalOut *led) {
-  while (true) {
-    *led = 1;
-    ThisThread::sleep_for(chrono::milliseconds((int)(duty * period_ms)));
+  int led_state = 1;
 
-    *led = 0;
-    ThisThread::sleep_for(chrono::milliseconds((int)((1 - duty) * period_ms)));
+  while (true) {
+    netstat_t *net_queue;
+    // *led = 1;
+    // ThisThread::sleep_for(chrono::milliseconds((int)(duty * period_ms)));
+
+    // *led = 0;
+    // ThisThread::sleep_for(chrono::milliseconds((int)((1 - duty) *
+    // period_ms)));
+
+    if (netstat_queue.try_get_for(
+        Kernel::Clock::duration(200), &net_queue)) {
+      led_state = net_queue->led_stat;
+      netstat_mpool.free(net_queue);
+    }
+
+    if (led_state == 1) {
+      *led = 1;
+    } else if (led_state == 2) {
+      *led = !*led;
+    } else {
+      *led = 0;
+    }
   }
 }
 
@@ -384,9 +426,10 @@ int main() {
   // modem=new Sim7600Cellular(PTD3,PTD2);
 
   xtc232 = new ATCmdParser(&rs232, "\r", 256, 2000);
-
+  ThisThread::sleep_for(500ms);
   vrf_en = 1;
   rtc_uptime = (unsigned int)rtc_read();
+  // while (mdm_status.read() && ((unsigned int)rtc_read() - rtc_uptime < 18));
   while (mdm_status.read() && ((unsigned int)rtc_read() - rtc_uptime < 18))
     ;
 
@@ -400,6 +443,16 @@ int main() {
   if (mdmOK) {
     printf("SIM7600 Status: Ready\r\n");
     if (modem->enable_echo(0)) {
+
+      //   modem->set_min_cFunction();
+      //   ThisThread::sleep_for(1000ms);
+
+      if (modem->get_pref_Mode() == 2) {
+        modem->set_pref_Mode(54);
+        ThisThread::sleep_for(3000ms);
+        modem->get_pref_Mode();
+      }
+
       if (!modem->save_setting()) {
         printf("Save ME user setting : Fail!!!" CRLF);
       }
@@ -409,6 +462,8 @@ int main() {
   netstat_thread.start(callback(blip_netstat, &netstat));
 
   modem->get_revID(revID);
+
+  //   mdm_flight = 0;
   modem->set_tz_update(0);
 
   if (mdmOK && modem->set_full_FUNCTION()) {
