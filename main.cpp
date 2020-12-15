@@ -15,7 +15,7 @@
 #include "FATFileSystem.h"
 #include "SPIFBlockDevice.h"
 
-#define firmware_vers "631127"
+#define firmware_vers "631215"
 
 #define INITIAL_APP_FILE "initial_script.txt"
 #define SPIF_MOUNT_PATH "spif"
@@ -106,15 +106,18 @@ Mutex mutex_idle_rs232, mutex_usb_cnnt;
 init_script_t init_script;
 struct tm struct_tm;
 
-typedef struct {
-  int led_stat;
-} netstat_t;
+// typedef struct {
+//   int led_stat;
+// } netstat_t;
 
-MemoryPool<netstat_t, 2> netstat_mpool;
-Queue<netstat_t, 2> netstat_queue;
+// MemoryPool<netstat_t, 2> netstat_mpool;
+// Queue<netstat_t, 2> netstat_queue;
 
-Mail<mail_t, 16> mail_box;
-Mail<mail_t, 8> ret_usb_mail;
+MemoryPool<int, 1> netstat_mpool;
+Queue<int, 1> netstat_queue;
+
+// Mail<mail_t, 16> mail_box;
+Mail<mail_t, 8> mail_box, ret_usb_mail;
 
 void printHEX(unsigned char *msg, unsigned int len);
 int read_xtc_to_char(char *tbuf, int size, char end);
@@ -152,7 +155,9 @@ void set_usb_cnnt(bool temp) {
 uint8_t read_dipsw() { return (~dipsw.read()) & 0x0f; }
 
 void netstat_led(netstat_mode inp = IDLE) {
-  netstat_t *net_queue = netstat_mpool.try_alloc();
+  //   netstat_t *net_queue = netstat_mpool.try_alloc();
+  int *net_queue = netstat_mpool.try_alloc();
+
   switch (inp) {
     //   case IDLE:
     //     period_ms = 400;
@@ -167,15 +172,18 @@ void netstat_led(netstat_mode inp = IDLE) {
     //     duty = 0.05;
     //   }
   case IDLE:
-    net_queue->led_stat = 1;
+    // net_queue->led_stat = 1;
+    *net_queue = 1;
     netstat_queue.try_put(net_queue);
     break;
   case CONNECTED:
-    net_queue->led_stat = 2;
+    // net_queue->led_stat = 2;
+    *net_queue = 2;
     netstat_queue.try_put(net_queue);
     break;
   default:
-    net_queue->led_stat = 0;
+    // net_queue->led_stat = 0;
+    *net_queue = 0;
     netstat_queue.try_put(net_queue);
   }
 }
@@ -184,7 +192,9 @@ void blip_netstat(DigitalOut *led) {
   int led_state = 1;
 
   while (true) {
-    netstat_t *net_queue;
+    // netstat_t *net_queue;
+    int *net_queue;
+
     // *led = 1;
     // ThisThread::sleep_for(chrono::milliseconds((int)(duty * period_ms)));
 
@@ -192,9 +202,9 @@ void blip_netstat(DigitalOut *led) {
     // ThisThread::sleep_for(chrono::milliseconds((int)((1 - duty) *
     // period_ms)));
 
-    if (netstat_queue.try_get_for(
-        Kernel::Clock::duration(200), &net_queue)) {
-      led_state = net_queue->led_stat;
+    if (netstat_queue.try_get_for(Kernel::Clock::duration(200), &net_queue)) {
+      //   led_state = net_queue->led_stat;
+      led_state = *net_queue;
       netstat_mpool.free(net_queue);
     }
 
@@ -300,8 +310,7 @@ void capture_thread_routine() {
 
       if (strlen(ret_rs232) > 0) {
 
-        printf("cmd[%d][0]= 0x%02X , ret[0]= 0x%02X\r\n", j, str_cmd[j][0],
-               ret_rs232[0]);
+        // printf("cmd[%d][0]= 0x%02X , ret[0]= 0x%02X\r\n", j, str_cmd[j][0],ret_rs232[0]);
 
         strcpy(mail->resp, ret_rs232);
 
@@ -425,7 +434,7 @@ int main() {
   modem = new Sim7600Cellular(_parser);
   // modem=new Sim7600Cellular(PTD3,PTD2);
 
-  xtc232 = new ATCmdParser(&rs232, "\r", 256, 2000);
+  xtc232 = new ATCmdParser(&rs232, "\r", 256, 1000);
   ThisThread::sleep_for(500ms);
   vrf_en = 1;
   rtc_uptime = (unsigned int)rtc_read();
@@ -463,7 +472,6 @@ int main() {
 
   modem->get_revID(revID);
 
-  //   mdm_flight = 0;
   modem->set_tz_update(0);
 
   if (mdmOK && modem->set_full_FUNCTION()) {
@@ -657,7 +665,12 @@ int main() {
                 mdm_rst = 0;
                 printf("MQTT Stop Fail: Rebooting Modem!!!" CRLF);
 
-                if (modem->check_modem_status()) {
+                rtc_uptime = (unsigned int)rtc_read();
+                while (mdm_status.read() &&
+                       ((unsigned int)rtc_read() - rtc_uptime < 18))
+                  ;
+
+                if (modem->check_modem_status(10)) {
                   printf("Restart Modem Complete : AT Ready!!!" CRLF);
                   netstat_led(IDLE);
                 }
@@ -806,7 +819,7 @@ void apply_script(FILE *file) {
 
     is_script_read = true;
 
-    printf("\r\n<----------------------------------->\r\n");
+    printf("\r\n<---------------------------------------->\r\n");
     printf("    broker: %s" CRLF, init_script.broker);
     printf("    port: %d" CRLF, init_script.port);
     // printf("    usr: %s" CRLF, init_script.usr);
@@ -815,7 +828,7 @@ void apply_script(FILE *file) {
     printf("    full_cmd: %s" CRLF, init_script.full_cmd);
     printf("    model: %s" CRLF, init_script.model);
     printf("    siteID: %s" CRLF, init_script.siteID);
-    printf("<----------------------------------->\r\n\n");
+    printf("<---------------------------------------->\r\n\n");
   }
 
   /* the whole file is now loaded in the memory buffer. */

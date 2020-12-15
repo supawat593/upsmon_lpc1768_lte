@@ -8,7 +8,6 @@
 #define MDM_RI_PIN PTD1
 #define MDM_DTR_PIN PTD4
 
-
 #define ECARD_TX_PIN PTB17
 #define ECARD_RX_PIN PTB16
 
