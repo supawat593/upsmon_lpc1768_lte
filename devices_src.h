@@ -42,6 +42,12 @@ char init_cfg_pattern[] = {
 char payload_pattern[] = "{\"imei\":%s,\"utc\":%u,\"model\":\"%s\",\"site_ID\":"
                          "\"%s\",\"cmd\":\"%s\",\"resp\":\"%s\"}";
 
+char stat_pattern[] =
+    "{\"imei\":%s,\"utc\":%u,\"firm_vers\":\"%s\",\"dev_group\":"
+    "\"%s\",\"stat_mode\":"
+    "\"%s\",\"csq_stat\":\"+CSQ: "
+    "%d,%d\",\"cops_opn\":\"%s\",\"reg_stat\":\"%s\"}";
+
 char dummy_msg[] =
     "(224.4 000.0 000.0 204.0 220.5 000 000 50.9 385 380 108.4 24.0 IM";
 
@@ -56,10 +62,11 @@ typedef struct {
   int port;
   char usr[32];
   char pwd[32];
-  char topic_path[64];
-  char full_cmd[32];
+  char topic_path[100];
+  char full_cmd[64];
   char model[32];
   char siteID[32];
 } init_script_t;
 
 typedef enum { OFF = 0, IDLE, CONNECTED } netstat_mode;
+typedef enum { PWRON = 0, NORMAL, NOFILE } blink_mode;

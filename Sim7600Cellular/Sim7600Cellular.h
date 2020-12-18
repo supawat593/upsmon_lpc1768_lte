@@ -12,18 +12,24 @@ public:
   bool enable_echo(bool en);
   bool save_setting();
   bool check_attachNW();
-  int get_csq(int *power, int *ber);
+  int set_cops(int mode=0,int format=2);
+  int get_cops(char *cops);
+  int get_csq(int *power, int *ber,int retry=10);
   int set_creg(int n);
   int get_creg();
+  int get_creg(char *payload);
+  int set_cereg(int n);
+  int get_cereg(char *payload);
   bool set_full_FUNCTION();
   bool set_min_cFunction();
   int get_revID(char *revid);
   int get_IMEI(char *simei);
   int get_ICCID(char *ciccid);
 
-  int set_pref_Mode(int mode=2);
+  int set_pref_Mode(int mode = 2);
   int get_pref_Mode();
-  int set_acq_order(int a1=9,int a2=5,int a3=3,int a4=11,int a5=2,int a6=4);
+  int set_acq_order(int a1 = 9, int a2 = 5, int a3 = 3, int a4 = 11, int a5 = 2,
+                    int a6 = 4);
   int get_acq_order();
 
   int get_IPAddr(char *ipaddr);
@@ -34,12 +40,13 @@ public:
 
   bool mqtt_start();
   bool mqtt_stop();
-  bool mqtt_release(int clientindex=0);
+  bool mqtt_release(int clientindex = 0);
   bool mqtt_accquire_client(char *clientName);
-  bool mqtt_connect(char *broker_ip, char *usr, char *pwd, int port = 1883,int clientindex=0);
+  bool mqtt_connect(char *broker_ip, char *usr, char *pwd, int port = 1883,
+                    int clientindex = 0);
   int mqtt_connect_stat(void);
   int mqtt_connect_stat(char *ret_msg);
-  int mqtt_isdisconnect(int clientindex=0);
+  int mqtt_isdisconnect(int clientindex = 0);
   bool mqtt_publish(char topic[64], char payload[256], int qos = 1,
                     int interval_s = 60);
 

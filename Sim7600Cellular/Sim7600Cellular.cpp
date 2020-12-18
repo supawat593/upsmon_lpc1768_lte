@@ -85,21 +85,58 @@ bool Sim7600Cellular::check_attachNW() {
   return false;
 }
 
-int Sim7600Cellular::get_csq(int *power, int *ber) {
-  int _power = 0;
-  int _ber = 0;
-  char ret[20];
+int Sim7600Cellular::set_cops(int mode, int format) {
+  char _cmd[16];
+  sprintf(_cmd, "AT+COPS=%d,%d", mode, format);
+  if (_atc->send(_cmd) && _atc->recv("OK")) {
+    printf("set---> AT+COPS=%d,%d\r\n", mode, format);
+    return 1;
+  }
+  return -1;
+}
 
-  if (_atc->send("AT+CSQ") && _atc->recv("+CSQ: %[^\n]\r\n", ret)) {
-    // printf("ret= %s\r\n",ret);
-    if (sscanf(ret, "%d,%d", &_power, &_ber) == 2) {
-      *power = _power;
-      *ber = _ber;
-      return 1;
+int Sim7600Cellular::get_cops(char *cops) {
+  char _ret[64];
+
+  if (_atc->send("AT+COPS?") && _atc->recv("+COPS: %*d,%*d,\"%[^\"]\"", _ret)) {
+    // printf("imei=  %s\r\n", _imei);
+    strcpy(cops, _ret);
+    return 1;
+  }
+  strcpy(cops, "");
+  return -1;
+}
+
+int Sim7600Cellular::get_csq(int *power, int *ber, int retry) {
+  int _power = 99;
+  int _ber = 99;
+  //   char ret[20];
+  int i = 0;
+  _atc->set_timeout(2000);
+  while ((i < retry) && (_power == 99)) {
+    if (_atc->send("AT+CSQ") && _atc->recv("+CSQ: %d,%d\r\n", &_power, &_ber)) {
+      printf("retry: %d -> +CSQ: %d,%d\r\n", i, _power, _ber);
     }
-    *power = 0;
-    *ber = 0;
-    return 0;
+    i++;
+    ThisThread::sleep_for(1000);
+  }
+  _atc->set_timeout(8000);
+
+  //   if (_atc->send("AT+CSQ") && _atc->recv("+CSQ: %[^\n]\r\n", ret)) {
+  //     // printf("ret= %s\r\n",ret);
+  //     if (sscanf(ret, "%d,%d", &_power, &_ber) == 2) {
+  //       *power = _power;
+  //       *ber = _ber;
+  //       return 1;
+  //     }
+  //     *power = 0;
+  //     *ber = 0;
+  //     return 0;
+  //   }
+  if (i < retry) {
+    *power = _power;
+    *ber = _ber;
+    return 1;
   }
 
   *power = 99;
@@ -123,7 +160,7 @@ int Sim7600Cellular::get_creg() {
   char ret[20];
 
   if (_atc->send("AT+CREG?") && _atc->scanf("+CREG: %[^\n]\r\n", ret)) {
-    printf("pattern found +CREG: %s\r\n", ret);
+    // printf("pattern found +CREG: %s\r\n", ret);
     // sscanf(ret,"%*d,%d",&stat);
 
     if (sscanf(ret, "%d,%d", &n, &stat) == 2) {
@@ -138,11 +175,55 @@ int Sim7600Cellular::get_creg() {
   return -1;
 }
 
+int Sim7600Cellular::get_creg(char *payload) {
+  int n = 0;
+  int stat = 0;
+  char ret[20];
+
+  if (_atc->send("AT+CREG?") && _atc->scanf("+CREG: %[^\n]\r\n", ret)) {
+    printf("pattern found +CREG: %s\r\n", ret);
+    // sscanf(ret,"%*d,%d",&stat);
+    char ret_msg[64];
+    sprintf(ret_msg, "+CREG: %s", ret);
+    strcpy(payload, ret_msg);
+    return 1;
+  }
+  strcpy(payload, "");
+  return -1;
+}
+
+int Sim7600Cellular::set_cereg(int n) {
+  char cmd[10];
+  sprintf(cmd, "AT+CEREG=%d", n);
+  if (_atc->send(cmd) && _atc->recv("OK")) {
+    printf("modem set---> AT+CEREG=%d\r\n", n);
+    return 1;
+  }
+  return -1;
+}
+
+int Sim7600Cellular::get_cereg(char *payload) {
+  int n = 0;
+  int stat = 0;
+  char ret[20];
+
+  if (_atc->send("AT+CEREG?") && _atc->scanf("+CEREG: %[^\n]\r\n", ret)) {
+    printf("pattern found +CEREG: %s\r\n", ret);
+    // sscanf(ret,"%*d,%d",&stat);
+    char ret_msg[64];
+    sprintf(ret_msg, "+CEREG: %s", ret);
+    strcpy(payload, ret_msg);
+    return 1;
+  }
+  strcpy(payload, "");
+  return -1;
+}
+
 bool Sim7600Cellular::set_full_FUNCTION() {
   bool bcops = false;
   bool bcfun = false;
-  if (_atc->send("AT+COPS=0") && _atc->recv("OK")) {
-    printf("set---> AT+COPS=0\r\n");
+
+  if (set_cops() == 1) {
     bcops = true;
   }
 
@@ -207,7 +288,8 @@ int Sim7600Cellular::set_pref_Mode(int mode) {
 
 int Sim7600Cellular::get_pref_Mode() {
   int ret = 0;
-  if (_atc->send("AT+CNMP?") && _atc->recv("+CNMP: %d\r\n", &ret)&&_atc->recv("OK")) {
+  if (_atc->send("AT+CNMP?") && _atc->recv("+CNMP: %d\r\n", &ret) &&
+      _atc->recv("OK")) {
     printf("+CNMP: %d\r\n", ret);
     // strcpy(ciccid, _iccid);
     return ret;
@@ -376,9 +458,10 @@ int Sim7600Cellular::ping_dstNW(char *dst, int nrty, int p_size,
 
 bool Sim7600Cellular::mqtt_start() {
   bool bmqtt_start = false;
-  if (_atc->send("AT+CMQTTSTART") && _atc->recv("OK") &&
-      _atc->recv("+CMQTTSTART: 0")) {
-    printf("AT+CMQTTSTART --> Completed\r\n");
+  //   if (_atc->send("AT+CMQTTSTART") && _atc->recv("OK")
+  //   &&_atc->recv("+CMQTTSTART: 0")) {
+  if (_atc->send("AT+CMQTTSTART") && _atc->recv("+CMQTTSTART: 0")) {
+    // printf("AT+CMQTTSTART --> Completed\r\n");
     bmqtt_start = true;
   }
   return bmqtt_start;
@@ -429,7 +512,7 @@ bool Sim7600Cellular::mqtt_connect(char *broker_ip, char *usr, char *pwd,
     // printf("connect cmd -> %s" CRLF, cmd);
 
     if ((index == clientindex) && (err == 0)) {
-      printf("MQTT connected\r\n");
+      //   printf("MQTT connected\r\n");
       return true;
     }
     printf("MQTT connect : index=%d err=%d\r\n", index, err);
