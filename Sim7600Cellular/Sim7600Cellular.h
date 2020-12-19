@@ -47,7 +47,7 @@ public:
   int mqtt_connect_stat(void);
   int mqtt_connect_stat(char *ret_msg);
   int mqtt_isdisconnect(int clientindex = 0);
-  bool mqtt_publish(char topic[64], char payload[256], int qos = 1,
+  bool mqtt_publish(char topic[64], char payload[512], int qos = 1,
                     int interval_s = 60);
 
 private:

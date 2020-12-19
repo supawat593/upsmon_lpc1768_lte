@@ -336,6 +336,7 @@ int Sim7600Cellular::get_cpsi(char *cpsi) {
     sprintf(cpsi, "+CPSI: %s", _cpsi);
     return 1;
   }
+  strcpy(cpsi,"");
   return -1;
 }
 
@@ -603,7 +604,7 @@ int Sim7600Cellular::mqtt_isdisconnect(int clientindex) {
   return -1;
 }
 
-bool Sim7600Cellular::mqtt_publish(char topic[64], char payload[256], int qos,
+bool Sim7600Cellular::mqtt_publish(char topic[64], char payload[512], int qos,
                                    int interval_s) {
   int len_topic = 0;
   int len_payload = 0;
