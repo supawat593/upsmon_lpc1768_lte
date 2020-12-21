@@ -219,15 +219,18 @@ int Sim7600Cellular::get_cereg(char *payload) {
   return -1;
 }
 
-bool Sim7600Cellular::set_full_FUNCTION() {
+bool Sim7600Cellular::set_full_FUNCTION(int rst) {
   bool bcops = false;
   bool bcfun = false;
+  char _cmd[16];
+
+  sprintf(_cmd,"AT+CFUN=1,%d",rst);
 
   if (set_cops() == 1) {
     bcops = true;
   }
 
-  if (_atc->send("AT+CFUN=1") && _atc->recv("OK")) {
+  if (_atc->send(_cmd) && _atc->recv("OK")) {
     printf("set---> AT+CFUN=1\r\n");
     bcfun = true;
   }
@@ -506,7 +509,8 @@ bool Sim7600Cellular::mqtt_connect(char *broker_ip, char *usr, char *pwd,
   //   bool bmqtt_cnt = false;
   sprintf(cmd, "AT+CMQTTCONNECT=0,\"tcp://%s:%d\",60,0,\"%s\",\"%s\"",
           broker_ip, port, usr, pwd);
-  printf("connect cmd -> %s\r\n", cmd);
+//   printf("connect cmd -> %s\r\n", cmd);
+
   if (_atc->send(cmd) && _atc->recv("OK") &&
       _atc->recv("+CMQTTCONNECT: %d,%d\r\n", &index, &err)) {
     // if (_parser->send(cmd)) {
@@ -604,7 +608,7 @@ int Sim7600Cellular::mqtt_isdisconnect(int clientindex) {
   return -1;
 }
 
-bool Sim7600Cellular::mqtt_publish(char topic[64], char payload[512], int qos,
+bool Sim7600Cellular::mqtt_publish(char topic[128], char payload[512], int qos,
                                    int interval_s) {
   int len_topic = 0;
   int len_payload = 0;
@@ -646,6 +650,85 @@ bool Sim7600Cellular::mqtt_publish(char topic[64], char payload[512], int qos,
 
   if (_atc->send(cmd_pub) && _atc->recv("OK") && _atc->recv("+CMQTTPUB: 0,0")) {
     printf("Publish msg : Done!!!\r\n");
+    _atc->set_timeout(8000);
+    return true;
+  }
+
+  _atc->set_timeout(8000);
+  return false;
+}
+
+bool Sim7600Cellular:: mqtt_sub(char topic[128], int clientindex, int qos){
+  int len_topic = 0;
+  char cmd_sub_topic[32];
+  char cmd_sub[32];
+  char cmd_ret_sub[32];
+  
+
+  len_topic = strlen(topic);
+
+  sprintf(cmd_sub_topic, "AT+CMQTTSUBTOPIC=%d,%d,%d",clientindex,len_topic,qos);
+  sprintf(cmd_sub, "AT+CMQTTSUB=%d", clientindex);
+  sprintf(cmd_ret_sub, "+CMQTTSUB: %d,0", clientindex);
+  
+
+  printf("cmd_sub_topic= %s\r\n", cmd_sub_topic);
+//   _atc->flush();
+  _atc->send(cmd_sub_topic);
+
+  if (_atc->recv(">")) {
+
+    if ((_atc->write(topic, len_topic) == len_topic) && _atc->recv("OK")) {
+      printf("set topic : %s Done!\r\n", topic);
+    }
+  }
+
+  ThisThread::sleep_for(1s);
+//   _atc->flush();
+  _atc->set_timeout(12000);
+
+  if (_atc->send(cmd_sub) && _atc->recv("OK") && _atc->recv(cmd_ret_sub)) {
+    printf("Subscribe Topic : Done!!!\r\n");
+    _atc->set_timeout(8000);
+    return true;
+  }
+
+  _atc->set_timeout(8000);
+  return false;
+}
+
+bool Sim7600Cellular:: mqtt_unsub(char topic[128], int clientindex,int dup){
+  int len_topic = 0;
+  char cmd_unsub_topic[32];
+  char cmd_unsub[32];
+  char cmd_ret_unsub[32];
+  
+
+  len_topic = strlen(topic);
+
+  sprintf(cmd_unsub_topic, "AT+CMQTTUNSUBTOPIC=%d,%d",clientindex,len_topic);
+  sprintf(cmd_unsub, "AT+CMQTTUNSUB=%d,%d", clientindex,dup);
+  sprintf(cmd_ret_unsub, "+CMQTTUNSUB: %d,0", clientindex);
+  
+
+  printf("cmd_unsub_topic= %s\r\n", cmd_unsub_topic);
+
+//   _atc->flush();
+  _atc->send(cmd_unsub_topic);
+
+  if (_atc->recv(">")) {
+
+    if ((_atc->write(topic, len_topic) == len_topic) && _atc->recv("OK")) {
+      printf("set topic : %s Done!\r\n", topic);
+    }
+  }
+
+  ThisThread::sleep_for(1s);
+//   _atc->flush();
+  _atc->set_timeout(12000);
+
+  if (_atc->send(cmd_unsub) && _atc->recv("OK") && _atc->recv(cmd_ret_unsub)) {
+    printf("Unsubscribe Topic : Done!!!\r\n");
     _atc->set_timeout(8000);
     return true;
   }

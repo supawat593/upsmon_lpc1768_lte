@@ -1,5 +1,6 @@
-#include"mbed.h"
 #include "devices_src.h"
+#include "mbed.h"
+
 
 typedef enum { OFF = 0, IDLE, CONNECTED } netstat_mode;
 typedef enum { PWRON = 0, NORMAL, NOFILE } blink_mode;
@@ -10,7 +11,7 @@ typedef struct {
   float duty;
 } blink_t;
 
-Mutex mutex_idle_rs232, mutex_usb_cnnt;
+Mutex mutex_idle_rs232, mutex_usb_cnnt, mutex_mdm_busy,mutex_notify;
 
 MemoryPool<int, 1> netstat_mpool;
 Queue<int, 1> netstat_queue;
@@ -21,7 +22,37 @@ Queue<blink_t, 1> blink_queue;
 Mail<mail_t, 8> mail_box, ret_usb_mail;
 
 volatile bool is_usb_cnnt = false;
-volatile char is_idle_rs232 = true;
+volatile bool is_idle_rs232 = true;
+volatile bool is_mdm_busy = true;
+volatile bool is_notify_ready = false;
+
+bool get_notify_ready() {
+  bool temp;
+  mutex_notify.lock();
+  temp = is_notify_ready;
+  mutex_notify.unlock();
+  return temp;
+}
+
+void set_notify_ready(bool temp) {
+  mutex_notify.lock();
+  is_notify_ready = temp;
+  mutex_notify.unlock();
+}
+
+bool get_mdm_busy() {
+  bool temp;
+  mutex_mdm_busy.lock();
+  temp = is_mdm_busy;
+  mutex_mdm_busy.unlock();
+  return temp;
+}
+
+void set_mdm_busy(bool temp) {
+  mutex_mdm_busy.lock();
+  is_mdm_busy = temp;
+  mutex_mdm_busy.unlock();
+}
 
 bool get_idle_rs232() {
   bool temp;

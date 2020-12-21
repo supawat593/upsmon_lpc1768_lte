@@ -64,6 +64,7 @@ bool mdmOK = false;
 bool mdmAtt = false;
 bool bmqtt_start = false;
 bool bmqtt_cnt = false;
+bool bmqtt_sub = false;
 
 int period_min = 0;
 int sig = 0, ber = 0;
@@ -82,16 +83,20 @@ char ret_cgdcont[128];
 char msg_cpsi[128];
 char str_topic[128];
 char mqtt_msg[256];
+char str_sub_topic[128];
 
-Thread blink_thread, netstat_thread, capture_thread, usb_thread;
+Thread blink_thread, netstat_thread, capture_thread, usb_thread,
+    mdm_notify_thread;
 
 init_script_t init_script;
 struct tm struct_tm;
 
+int read_parser_to_char(char *tbuf, int size, char end);
 int read_xtc_to_char(char *tbuf, int size, char end);
 void read_initial_script();
 void apply_script(FILE *file);
 void device_stat_update(const char *stat_mode = "NORMAL");
+void write_init_script();
 
 uint8_t read_dipsw() { return (~dipsw.read()) & 0x0f; }
 
@@ -148,9 +153,14 @@ void capture_thread_routine() {
 
   char ret_rs232[128];
   char str_cmd[6][20];
+
+  char full_cmd[64];
+  strcpy(full_cmd, init_script.full_cmd);
+
   char delim[] = ",";
   char *ptr;
-  ptr = strtok(init_script.full_cmd, delim);
+  //   ptr = strtok(init_script.full_cmd, delim);
+  ptr = strtok(full_cmd, delim);
   int n_cmd = 0;
 
   while ((ptr != 0) && (n_cmd < 6)) {
@@ -226,6 +236,107 @@ void capture_thread_routine() {
     }
 
     ThisThread::sleep_for(chrono::minutes(period_min));
+  }
+}
+
+void script_config_process(char cfg_msg[512]) {
+  char str_cmd[10][100];
+
+  char delim[] = "&";
+  char *ptr;
+  //   ptr = strtok(init_script.full_cmd, delim);
+  ptr = strtok(cfg_msg, delim);
+  int n_cmd = 0;
+
+  while ((ptr != 0) && (n_cmd < 10)) {
+    strcpy(str_cmd[n_cmd], ptr);
+    // sscanf(ptr, "\"%[^\"]\"", str_cmd[n_cmd]);
+    n_cmd++;
+    ptr = strtok(NULL, delim);
+  }
+
+  int cfg_success = 0;
+
+  for (int i = 0; i < n_cmd; i++) {
+    if (sscanf(str_cmd[i], "Command: [%[^]]]", init_script.full_cmd) == 1) {
+      cfg_success++;
+    } else if (sscanf(str_cmd[i], "Topic: \"%[^\"]\"",
+                      init_script.topic_path) == 1) {
+      cfg_success++;
+    } else if (sscanf(str_cmd[i], "Model: \"%[^\"]\"", init_script.model) ==
+               1) {
+      cfg_success++;
+    } else if (sscanf(str_cmd[i], "Site_ID: \"%[^\"]\"", init_script.siteID) ==
+               1) {
+      cfg_success++;
+    } else {
+      printf("Not Matched!\r\n");
+    }
+  }
+
+  if (cfg_success > 0) {
+    write_init_script();
+    system_reset();
+  }
+}
+
+void mdm_notify_routine() {
+  printf("mdm_notify_routine() started ---> waiting for notify_flag & "
+         "bmqtt_sub\r\n");
+  char mdm_xbuf[512];
+  char xbuf_trim[512];
+  char sub_topic[128];
+  char sub_payload[256];
+  int client_idx = 0;
+  int len_topic = 0;
+  int len_payload = 0;
+  int st = 0, end = 0;
+
+  while (true) {
+    // if (get_notify_ready() && (!get_mdm_busy()) && mdm.readable()) {
+    if (get_notify_ready() && (!get_mdm_busy())) {
+      if (mdm.readable()) {
+        set_mdm_busy(true);
+        memset(mdm_xbuf, 0, 512);
+        _parser->set_timeout(1000);
+        _parser->read(mdm_xbuf, 512);
+        //   read_parser_to_char(mdm_xbuf, 512, '\n');
+        _parser->set_timeout(8000);
+        //   printHEX((unsigned char *)mdm_xbuf, 512);
+
+        char end_text[] = {0x0d, 0x0a, 0x00, 0x00};
+        st = 0;
+        end = 0;
+        while ((strncmp(&mdm_xbuf[st], "+CMQTTRXSTART:", 14) != 0) &&
+               (st < 512)) {
+          st++;
+        }
+
+        end = st;
+        while ((strncmp(&mdm_xbuf[end], end_text, 4) != 0) && (end < 512)) {
+          end++;
+        }
+
+        memset(xbuf_trim, 0, 512);
+        memcpy(&xbuf_trim, &mdm_xbuf[st], end - st + 2);
+
+        // debug_if(strlen(xbuf_trim) > 0,"\r\n<----- xbuf_trim
+        // ------>\r\n%s\r\n", xbuf_trim);
+
+        if (sscanf(xbuf_trim, mqtt_sub_pattern, &len_topic, sub_topic,
+                   &len_payload, sub_payload, &client_idx) == 5) {
+          printf("\r\n< -------------------------------------------------\r\n");
+          printf("len_topic=%d\r\n", len_topic);
+          printf("sub_topic=%s\r\n", sub_topic);
+          printf("len_payload=%d\r\n", len_payload);
+          printf("sub_payload=%s\r\n", sub_payload);
+          printf("client_idx=%d\r\n", client_idx);
+          printf("------------------------------------------------- >\r\n");
+        }
+        script_config_process(sub_payload);
+        set_mdm_busy(false);
+      }
+    }
   }
 }
 
@@ -408,10 +519,23 @@ int main() {
 
   if (is_script_read) {
     blink_led(NORMAL); //  normal Mode
+    set_mdm_busy(false);
+  }
+
+  if (bmqtt_cnt) {
+    memset(str_sub_topic, 0, 128);
+    sprintf(str_sub_topic, "%s/config/%s", init_script.topic_path, imei);
+    bmqtt_sub = modem->mqtt_sub(str_sub_topic);
+
+    // if (bmqtt_sub) {
+    //   set_notify_ready(true);
+    // }
   }
 
   capture_thread.start(callback(capture_thread_routine));
   usb_thread.start(callback(usb_passthrough));
+  mdm_notify_thread.start(callback(mdm_notify_routine));
+
   pwake.fall(&fall_wake);
 
   while (true) {
@@ -434,18 +558,33 @@ int main() {
       sprintf(mqtt_msg, payload_pattern, imei, mail->utc, init_script.model,
               init_script.siteID, mail->cmd, mail->resp);
 
-      if (bmqtt_cnt) {
-        modem->mqtt_publish(str_topic, mqtt_msg);
-        printf("< ------------------------------------------------ >" CRLF);
+      if (bmqtt_cnt && (!get_mdm_busy())) {
+        set_notify_ready(false);
+        set_mdm_busy(true);
+
+        if (modem->mqtt_publish(str_topic, mqtt_msg)) {
+          printf("< ------------------------------------------------ >" CRLF);
+        }
+        set_mdm_busy(false);
+
+        // if (bmqtt_sub) {
+        //   set_notify_ready(true);
+        // }
       }
+
       mail_box.free(mail);
     }
     //  else NullPtr
     else {
-      if (((unsigned int)rtc_read() - last_rtc_check_NW) > 55) {
+      //   if (((unsigned int)rtc_read() - last_rtc_check_NW) > 55) {
+      if ((((unsigned int)rtc_read() - last_rtc_check_NW) > 55) &&
+          (!get_mdm_busy())) {
         last_rtc_check_NW = (unsigned int)rtc_read();
         printf(CRLF "<----- Checking NW. Status ----->" CRLF);
         printf("timestamp : %d\r\n", (unsigned int)rtc_read());
+
+        set_notify_ready(false);
+        set_mdm_busy(true);
 
         // check AT>OK
         if (!modem->check_modem_status(10)) {
@@ -455,6 +594,8 @@ int main() {
           vrf_en = 1;
           bmqtt_start = false;
           bmqtt_cnt = false;
+          bmqtt_sub = false;
+
           rtc_uptime = (unsigned int)rtc_read();
 
           while (mdm_status.read() &&
@@ -523,6 +664,13 @@ int main() {
                       modem->mqtt_connect(dns_ip, init_script.usr,
                                           init_script.pwd, init_script.port);
                   debug_if(bmqtt_cnt, "MQTT Connected\r\n");
+
+                  if (bmqtt_cnt) {
+                    memset(str_sub_topic, 0, 128);
+                    sprintf(str_sub_topic, "%s/config/%s",
+                            init_script.topic_path, imei);
+                    bmqtt_sub = modem->mqtt_sub(str_sub_topic);
+                  }
                 }
               }
             }
@@ -532,11 +680,19 @@ int main() {
                 bmqtt_cnt = modem->mqtt_connect(
                     dns_ip, init_script.usr, init_script.pwd, init_script.port);
                 debug_if(bmqtt_cnt, "MQTT Connected\r\n");
+
+                if (bmqtt_cnt) {
+                  memset(str_sub_topic, 0, 128);
+                  sprintf(str_sub_topic, "%s/config/%s", init_script.topic_path,
+                          imei);
+                  bmqtt_sub = modem->mqtt_sub(str_sub_topic);
+                }
               }
             }
 
             if (modem->mqtt_isdisconnect() < 1) {
               bmqtt_cnt = false;
+              bmqtt_sub = false;
 
               if (modem->mqtt_release()) {
 
@@ -565,9 +721,19 @@ int main() {
               }
             } else {
               bmqtt_cnt = true;
-              char ret_cnnt_stat[128];
-              modem->mqtt_connect_stat(ret_cnnt_stat);
-              printf("ret_cnnt_stat-> %s\r\n", ret_cnnt_stat);
+              //   char ret_cnnt_stat[128];
+              //   modem->mqtt_connect_stat(ret_cnnt_stat);
+              //   printf("ret_cnnt_stat-> %s\r\n", ret_cnnt_stat);
+
+              //   if (bmqtt_sub) {
+              //     bmqtt_sub = false;
+              //     memset(str_sub_topic, 0, 128);
+              //     sprintf(str_sub_topic, "%s/config/%s",
+              //     init_script.topic_path,
+              //             imei);
+              //     debug_if(modem->mqtt_unsub(str_sub_topic),
+              //              "MQTT Unsub Complete!!!\r\n");
+              //   }
             }
 
             // if (modem->ping_dstNW("8.8.8.8") < 1000) {
@@ -586,14 +752,51 @@ int main() {
             ThisThread::sleep_for(500ms);
             mdm_flight = 0;
             bmqtt_cnt = false;
+            bmqtt_sub = false;
             printf("NW Connection Fail: On/Off Flight Mode" CRLF);
+
+            if (modem->get_ICCID(iccid) < 1) {
+              modem->set_full_FUNCTION(1);
+            }
           }
         }
         // end check AT>OK
+
+        set_mdm_busy(false);
+
+        if (bmqtt_sub) {
+          set_notify_ready(true);
+        }
+
       } // end last_rtc_check_NW > 55
     }   // end else NullPtr
   }     // end while(true)
 } // end main()
+
+int read_parser_to_char(char *tbuf, int size, char end) {
+  int count = 0;
+  int x = 0;
+
+  if (size > 0) {
+    for (count = 0; (count < size) && (x >= 0) && (x != end); count++) {
+      x = _parser->getc();
+      *(tbuf + count) = (char)x;
+    }
+
+    count--;
+    *(tbuf + count) = 0;
+
+    // Convert line endings:
+    // If end was '\n' (0x0a) and the preceding character was 0x0d, then
+    // overwrite that with null as well.
+    if ((count > 0) && (end == '\n') && (*(tbuf + count - 1) == '\x0d')) {
+      count--;
+      *(tbuf + count) = 0;
+    }
+  }
+
+  return count;
+}
 
 int read_xtc_to_char(char *tbuf, int size, char end) {
   int count = 0;
@@ -736,4 +939,35 @@ void device_stat_update(const char *stat_mode) {
       modem->mqtt_publish(stat_topic, stat_payload);
     }
   }
+}
+
+void write_init_script() {
+  bd.init();
+  int err = fs.mount(&bd);
+
+  if (err) {
+    printf("%s filesystem mount failed\r\n", fs.getName());
+  }
+
+  FILE *file = fopen(FULL_SCRIPT_FILE_PATH, "w");
+
+  if (file != NULL) {
+    printf("initial script found\r\n");
+    char fbuffer[512];
+    sprintf(fbuffer, init_cfg_write, init_script.broker, init_script.port,
+            init_script.topic_path, init_script.full_cmd, init_script.model,
+            init_script.siteID);
+
+    // sprintf(fbuffer, "Hello : %d\r\n",15);
+
+    printf("------------- fbuffer ------------- >\r\n%s\r\n< "
+           "--------------------------\r\n",
+           fbuffer);
+    fprintf(file, fbuffer);
+  }
+
+  fclose(file);
+
+  fs.unmount();
+  bd.deinit();
 }

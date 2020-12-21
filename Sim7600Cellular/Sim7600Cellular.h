@@ -12,15 +12,15 @@ public:
   bool enable_echo(bool en);
   bool save_setting();
   bool check_attachNW();
-  int set_cops(int mode=0,int format=2);
+  int set_cops(int mode = 0, int format = 2);
   int get_cops(char *cops);
-  int get_csq(int *power, int *ber,int retry=10);
+  int get_csq(int *power, int *ber, int retry = 10);
   int set_creg(int n);
   int get_creg();
   int get_creg(char *payload);
   int set_cereg(int n);
   int get_cereg(char *payload);
-  bool set_full_FUNCTION();
+  bool set_full_FUNCTION(int rst=0);
   bool set_min_cFunction();
   int get_revID(char *revid);
   int get_IMEI(char *simei);
@@ -47,8 +47,10 @@ public:
   int mqtt_connect_stat(void);
   int mqtt_connect_stat(char *ret_msg);
   int mqtt_isdisconnect(int clientindex = 0);
-  bool mqtt_publish(char topic[64], char payload[512], int qos = 1,
+  bool mqtt_publish(char topic[128], char payload[512], int qos = 1,
                     int interval_s = 60);
+  bool mqtt_sub(char topic[128], int clientindex = 0, int qos = 1);
+  bool mqtt_unsub(char topic[128], int clientindex = 0,int dup=0);
 
 private:
   ATCmdParser *_atc;
