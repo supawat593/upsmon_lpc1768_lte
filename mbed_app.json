@@ -8,7 +8,7 @@
         },
         "K22F":{
             "target.bootloader_supported":true,
-            "target.bootloader_img":"C:\\Users\\supawat\\Mbed Programs\\mbed-os-k22f_bootloader\\BUILD\\K22F\\ARMC6\\mbed-os-k22f_bootloader.bin",
+            "target.bootloader_img":"C:\\Users\\supawat\\Mbed Programs\\k22f_bootloader\\upsmon_lte_0x19000_bootloader.bin",
             "target.app_offset":"0x19000",
             "spif-driver.SPI_FREQ":"16000000",
             "spif-driver.SPI_MOSI":"PTD6",

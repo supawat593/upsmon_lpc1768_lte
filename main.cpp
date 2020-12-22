@@ -16,7 +16,9 @@
 #include "FATFileSystem.h"
 #include "SPIFBlockDevice.h"
 
-#define firmware_vers "631220"
+#include "Base64.h"
+
+#define firmware_vers "631224"
 #define Dev_Group "LTE"
 
 #define INITIAL_APP_FILE "initial_script.txt"
@@ -78,6 +80,7 @@ char iccid[20];
 char ipaddr[32];
 char dns_ip[16];
 
+char encode_key[64];
 char revID[20];
 char ret_cgdcont[128];
 char msg_cpsi[128];
@@ -91,6 +94,8 @@ Thread blink_thread, netstat_thread, capture_thread, usb_thread,
 init_script_t init_script;
 struct tm struct_tm;
 
+Base64 base64_obj;
+
 int read_parser_to_char(char *tbuf, int size, char end);
 int read_xtc_to_char(char *tbuf, int size, char end);
 void read_initial_script();
@@ -100,10 +105,47 @@ void write_init_script();
 
 uint8_t read_dipsw() { return (~dipsw.read()) & 0x0f; }
 
+int detection_notify(const char *keyword, char *src, char *dst) {
+  int st = 0, end = 0;
+  int len_keyword = 0;
+  len_keyword = strlen(keyword);
+
+  int len_src = 0;
+  if (strlen(src) > 1) {
+    len_src = strlen(src);
+  } else {
+    len_src = 512;
+  }
+
+  //   printf("Notify: len_src=%d\r\n", len_src);
+  // printHEX((unsigned char *)src, len_src);
+
+  char end_text[] = {0x0d, 0x0a, 0x00, 0x00};
+  st = 0;
+  end = 0;
+
+  while ((strncmp(&src[st], keyword, len_keyword) != 0) && (st < len_src)) {
+    st++;
+  }
+
+  end = st;
+  while ((strncmp(&src[end], end_text, 4) != 0) && (end < len_src)) {
+    end++;
+  }
+
+  if (st < len_src) {
+    memcpy(&dst[0], &src[st], end - st + 2);
+    return 1;
+  } else {
+    strcpy(dst, "");
+    return 0;
+  }
+}
+
 void usb_passthrough() {
-  printf("\r\n-------------------------------\r\n");
+  printf("\r\n----------------------------------\r\n");
   printf("start usb_passthrough Thread...\r\n");
-  printf("-------------------------------\r\n");
+  printf("----------------------------------\r\n");
   char str_usb_ret[128];
   USBSerial pc2;
 
@@ -241,7 +283,7 @@ void capture_thread_routine() {
 
 void script_config_process(char cfg_msg[512]) {
   char str_cmd[10][100];
-
+  char raw_key[64];
   char delim[] = "&";
   char *ptr;
   //   ptr = strtok(init_script.full_cmd, delim);
@@ -269,6 +311,24 @@ void script_config_process(char cfg_msg[512]) {
     } else if (sscanf(str_cmd[i], "Site_ID: \"%[^\"]\"", init_script.siteID) ==
                1) {
       cfg_success++;
+    } else if (sscanf(str_cmd[i], "Key: \"%[^\"]\"", raw_key) == 1) {
+      char raw_usr[16], raw_pwd[16];
+
+      size_t len_key_encode = (size_t)strlen(raw_key);
+      size_t len_key_decode;
+      char *key_decode1 =
+          base64_obj.Decode(raw_key, len_key_encode, &len_key_decode);
+
+      size_t len_key_decode2;
+      char *key_decode2 =
+          base64_obj.Decode(key_decode1, len_key_decode, &len_key_decode2);
+
+      if (sscanf(key_decode2, "%[^ ] %[^\n]", raw_usr, raw_pwd) == 2) {
+        memset(encode_key, 0, 64);
+        strcpy(encode_key, raw_key);
+        printf("configuration process: Key Changed" CRLF);
+        cfg_success++;
+      }
     } else {
       printf("Not Matched!\r\n");
     }
@@ -281,8 +341,7 @@ void script_config_process(char cfg_msg[512]) {
 }
 
 void mdm_notify_routine() {
-  printf("mdm_notify_routine() started ---> waiting for notify_flag & "
-         "bmqtt_sub\r\n");
+  printf("mdm_notify_routine() started --->\r\n");
   char mdm_xbuf[512];
   char xbuf_trim[512];
   char sub_topic[128];
@@ -298,42 +357,46 @@ void mdm_notify_routine() {
       if (mdm.readable()) {
         set_mdm_busy(true);
         memset(mdm_xbuf, 0, 512);
+        memset(xbuf_trim, 0, 512);
+
+        // _parser->debug_on(1);
         _parser->set_timeout(1000);
         _parser->read(mdm_xbuf, 512);
         //   read_parser_to_char(mdm_xbuf, 512, '\n');
         _parser->set_timeout(8000);
-        //   printHEX((unsigned char *)mdm_xbuf, 512);
+        // _parser->debug_on(0);
 
-        char end_text[] = {0x0d, 0x0a, 0x00, 0x00};
-        st = 0;
-        end = 0;
-        while ((strncmp(&mdm_xbuf[st], "+CMQTTRXSTART:", 14) != 0) &&
-               (st < 512)) {
-          st++;
+        if (detection_notify("+CMQTTRXSTART:", mdm_xbuf, xbuf_trim)) {
+
+          if (sscanf(xbuf_trim, mqtt_sub_pattern, &len_topic, sub_topic,
+                     &len_payload, sub_payload, &client_idx) == 5) {
+            printf(
+                "\r\n< -------------------------------------------------\r\n");
+            printf("len_topic=%d\r\n", len_topic);
+            printf("sub_topic=%s\r\n", sub_topic);
+            printf("len_payload=%d\r\n", len_payload);
+            printf("sub_payload=%s\r\n", sub_payload);
+            printf("client_idx=%d\r\n", client_idx);
+            printf("------------------------------------------------- >\r\n");
+          }
+          script_config_process(sub_payload);
+
+        } else if (detection_notify("+CEREG:", mdm_xbuf, xbuf_trim)) {
+          printf("Notify msg: %s\r\n", xbuf_trim);
+        } else if (detection_notify("+CREG:", mdm_xbuf, xbuf_trim)) {
+          printf("Notify msg: %s\r\n", xbuf_trim);
+        } else if (detection_notify("+CMQTTCONNLOST:", mdm_xbuf, xbuf_trim)) {
+          printf("Notify msg: %s\r\n", xbuf_trim);
+          bmqtt_cnt = false;
+          bmqtt_sub = false;
+        } else if (detection_notify("+CMQTTNONET", mdm_xbuf, xbuf_trim)) {
+          printf("Notify msg: %s\r\n", xbuf_trim);
+          bmqtt_start = false;
+          bmqtt_cnt = false;
+          bmqtt_sub = false;
+        } else {
         }
 
-        end = st;
-        while ((strncmp(&mdm_xbuf[end], end_text, 4) != 0) && (end < 512)) {
-          end++;
-        }
-
-        memset(xbuf_trim, 0, 512);
-        memcpy(&xbuf_trim, &mdm_xbuf[st], end - st + 2);
-
-        // debug_if(strlen(xbuf_trim) > 0,"\r\n<----- xbuf_trim
-        // ------>\r\n%s\r\n", xbuf_trim);
-
-        if (sscanf(xbuf_trim, mqtt_sub_pattern, &len_topic, sub_topic,
-                   &len_payload, sub_payload, &client_idx) == 5) {
-          printf("\r\n< -------------------------------------------------\r\n");
-          printf("len_topic=%d\r\n", len_topic);
-          printf("sub_topic=%s\r\n", sub_topic);
-          printf("len_payload=%d\r\n", len_payload);
-          printf("sub_payload=%s\r\n", sub_payload);
-          printf("client_idx=%d\r\n", client_idx);
-          printf("------------------------------------------------- >\r\n");
-        }
-        script_config_process(sub_payload);
         set_mdm_busy(false);
       }
     }
@@ -700,6 +763,7 @@ int main() {
                   bmqtt_start = false;
                 } else {
                   bmqtt_start = false;
+                  netstat_led(OFF);
                   mdm_rst = 1;
                   ThisThread::sleep_for(500ms);
                   mdm_rst = 0;
@@ -713,6 +777,7 @@ int main() {
                   if (modem->check_modem_status(10)) {
                     printf("Restart Modem Complete : AT Ready!!!" CRLF);
                     modem->set_cops();
+                    modem->set_full_FUNCTION();
                     modem->set_creg(2);
                     modem->set_cereg(2);
                     netstat_led(IDLE);
@@ -747,16 +812,27 @@ int main() {
             }
 
           } else {
-            netstat_led(IDLE);
-            mdm_flight = 1;
-            ThisThread::sleep_for(500ms);
-            mdm_flight = 0;
+            netstat_led(OFF);
+            bmqtt_start = false;
             bmqtt_cnt = false;
             bmqtt_sub = false;
-            printf("NW Connection Fail: On/Off Flight Mode" CRLF);
+            mdm_rst = 1;
+            ThisThread::sleep_for(500ms);
+            mdm_rst = 0;
+            printf("NW Attaching Fail: Rebooting Modem!!!" CRLF);
 
-            if (modem->get_ICCID(iccid) < 1) {
-              modem->set_full_FUNCTION(1);
+            rtc_uptime = (unsigned int)rtc_read();
+            while (mdm_status.read() &&
+                   ((unsigned int)rtc_read() - rtc_uptime < 18))
+              ;
+
+            if (modem->check_modem_status(10)) {
+              printf("Restart Modem Complete : AT Ready!!!" CRLF);
+              modem->set_cops();
+              modem->set_full_FUNCTION();
+              modem->set_creg(2);
+              modem->set_cereg(2);
+              netstat_led(IDLE);
             }
           }
         }
@@ -881,25 +957,24 @@ void apply_script(FILE *file) {
     // printf("script_buf: %s" CRLF, script_buff);
   }
 
+  char key_encoded[64];
+
   //   if (sscanf(script_buff, init_cfg_pattern, init_script.broker,
   //              &init_script.port, init_script.usr, init_script.pwd,
   //              init_script.topic_path, init_script.full_cmd,
   //              init_script.model, init_script.siteID) == 8) {
   if (sscanf(script_buff, init_cfg_pattern, init_script.broker,
-             &init_script.port, init_script.topic_path, init_script.full_cmd,
-             init_script.model, init_script.siteID) == 6) {
+             &init_script.port, key_encoded, init_script.topic_path,
+             init_script.full_cmd, init_script.model,
+             init_script.siteID) == 7) {
     if (init_script.topic_path[strlen(init_script.topic_path) - 1] == '/') {
       init_script.topic_path[strlen(init_script.topic_path) - 1] = '\0';
     }
 
-    strcpy(init_script.usr, mqtt_usr);
-    strcpy(init_script.pwd, mqtt_pwd);
-
-    is_script_read = true;
-
     printf("\r\n<---------------------------------------->\r\n");
     printf("    broker: %s" CRLF, init_script.broker);
     printf("    port: %d" CRLF, init_script.port);
+    printf("    Key: %s" CRLF, key_encoded);
     // printf("    usr: %s" CRLF, init_script.usr);
     // printf("    pwd: %s" CRLF, init_script.pwd);
     printf("    topic_path: %s" CRLF, init_script.topic_path);
@@ -907,6 +982,21 @@ void apply_script(FILE *file) {
     printf("    model: %s" CRLF, init_script.model);
     printf("    siteID: %s" CRLF, init_script.siteID);
     printf("<---------------------------------------->\r\n\n");
+
+    size_t len_key_encode = (size_t)strlen(key_encoded);
+    size_t len_key_decode;
+    char *key_decode1 =
+        base64_obj.Decode(key_encoded, len_key_encode, &len_key_decode);
+
+    size_t len_key_decode2;
+    char *key_decode2 =
+        base64_obj.Decode(key_decode1, len_key_decode, &len_key_decode2);
+
+    if (sscanf(key_decode2, "%[^ ] %[^\n]", init_script.usr, init_script.pwd) ==
+        2) {
+      //   printf("usr=%s pwd=%s\r\n", init_script.usr, init_script.pwd);
+      is_script_read = true;
+    }
   }
 
   /* the whole file is now loaded in the memory buffer. */
@@ -955,8 +1045,8 @@ void write_init_script() {
     printf("initial script found\r\n");
     char fbuffer[512];
     sprintf(fbuffer, init_cfg_write, init_script.broker, init_script.port,
-            init_script.topic_path, init_script.full_cmd, init_script.model,
-            init_script.siteID);
+            encode_key, init_script.topic_path, init_script.full_cmd,
+            init_script.model, init_script.siteID);
 
     // sprintf(fbuffer, "Hello : %d\r\n",15);
 

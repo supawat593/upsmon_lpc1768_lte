@@ -39,13 +39,13 @@ const char *str_ret[] = {
     "NO_RESP3"};
 
 char init_cfg_pattern[] = {
-    "%*[^\n]\nBroker: \"%[^\"]\"\nPort: %d\nTopic: \"%[^\"]\"\nCommand: "
+    "%*[^\n]\nBroker: \"%[^\"]\"\nPort: %d\nKey: \"%[^\"]\"\nTopic: \"%[^\"]\"\nCommand: "
     "[%[^]]]\nModel: \"%[^\"]\"\nSite_ID: "
     "\"%[^\"]\"\n%*s"};
 
 char init_cfg_write[] = {
     "#Configuration file for UPS Monitor\r\n\r\nSTART:\r\nBroker: "
-    "\"%s\"\r\nPort: %d\r\nTopic: \"%s\"\r\nCommand: "
+    "\"%s\"\r\nPort: %d\r\nKey: \"%s\"\r\nTopic: \"%s\"\r\nCommand: "
     "[%s]\r\nModel: \"%s\"\r\nSite_ID: \"%s\"\r\nSTOP:"};
 
 char payload_pattern[] = "{\"imei\":%s,\"utc\":%u,\"model\":\"%s\",\"site_ID\":"
