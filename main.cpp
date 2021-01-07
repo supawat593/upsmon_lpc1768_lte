@@ -18,7 +18,7 @@
 
 #include "Base64.h"
 
-#define firmware_vers "631224"
+#define firmware_vers "640106"
 #define Dev_Group "LTE"
 
 #define INITIAL_APP_FILE "initial_script.txt"
@@ -452,7 +452,7 @@ void ntp_sync() {
     if (_parser->send("AT+CNTP?") &&
         _parser->scanf("+CNTP: %[^\n]\r\n", ret_ntp)) {
       printf("ret_ntp--> +CNTP: %s\r\n", ret_ntp);
-      _parser->set_timeout(12000);
+      _parser->set_timeout(15000);
 
       if (_parser->send("AT+CNTP") && _parser->recv("+CNTP: 0")) {
         //   if (_parser->send("AT+CNTP") && _parser->recv("OK")) {
@@ -561,7 +561,17 @@ int main() {
   }
 
   ntp_sync();
+
+  char cclk_msg[32];
+  if (_parser->send("AT+CCLK?") &&
+      _parser->scanf("+CCLK: \"%[^\"]\"\r\n", cclk_msg)) {
+    printf("msg= %s\r\n", cclk_msg);
+    sync_rtc(cclk_msg);
+    printf("timestamp : %d\r\n", (unsigned int)rtc_read());
+  }
+
   last_rtc_check_NW = (unsigned int)rtc_read();
+  last_ntp_sync = (unsigned int)rtc_read();
 
   bmqtt_start = modem->mqtt_start();
   debug_if(bmqtt_start, "MQTT Started\r\n");
@@ -996,6 +1006,7 @@ void apply_script(FILE *file) {
         2) {
       //   printf("usr=%s pwd=%s\r\n", init_script.usr, init_script.pwd);
       is_script_read = true;
+      strcpy(encode_key, key_encoded);
     }
   }
 
