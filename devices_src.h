@@ -1,3 +1,4 @@
+#if TARGET_K22F
 #define MDM_TXD_PIN PTD3
 #define MDM_RXD_PIN PTD2
 #define MDM_RI_PIN PTD1
@@ -20,6 +21,35 @@
 #define DIPSW_P2_PIN PTC5
 #define DIPSW_P3_PIN PTC6
 #define DIPSW_P4_PIN PTC7
+
+#endif
+
+
+#if TARGET_LPC1768
+#define MDM_TXD_PIN P0_15
+#define MDM_RXD_PIN P0_16
+#define MDM_RI_PIN  P0_21
+#define MDM_DTR_PIN P0_20
+
+#define MDM_VRF_EN_PIN PTC8
+#define MDM_RST_PIN PTB1
+#define MDM_PWR_PIN PTB2
+#define MDM_FLIGHT_PIN PTC10
+#define MDM_STATUS_PIN PTC9
+
+#define ECARD_TX_PIN P0_10
+#define ECARD_RX_PIN P0_11
+
+#define WDT_WAKE_PIN P2_5
+#define WDT_DONE_PIN P2_4
+#define USB_DET_PIN  P1_31
+
+#define DIPSW_P1_PIN P2_0
+#define DIPSW_P2_PIN P2_1
+#define DIPSW_P3_PIN P2_2
+#define DIPSW_P4_PIN P2_3
+
+#endif
 
 char mqtt_broker_ip[] = "188.166.189.39";
 // char mqtt_broker[] = "trueiot.io";

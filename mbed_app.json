@@ -1,10 +1,13 @@
 {
     "target_overrides":{
         "*":{
+            "platform.stdio-baud-rate": 115200,
+            "platform.callback-nontrivial": true,
             "platform.stdio-convert-newlines":true,
+            "target.tickless-from-us-ticker":true,
             "target.printf_lib":"std",
             "target.features_add":["STORAGE"],
-            "target.components_add":["SPIF"]
+            "target.components_add":["SPIF","FLASHIAP"]
         },
         "K22F":{
             "target.bootloader_supported":true,
@@ -15,6 +18,16 @@
             "spif-driver.SPI_MISO":"PTD7",
             "spif-driver.SPI_CLK":"PTD5",
             "spif-driver.SPI_CS":"PTD0"
+        },
+        "LPC1768":{
+            "target.bootloader_supported":true,
+            "target.bootloader_img":"../mbed_os_bootloader_upsmon/BUILD/LPC1768/ARMC6/mbed_os_bootloader_upsmon.bin",
+            "target.app_offset":"0x18000",
+            "spif-driver.SPI_FREQ":"8000000",
+            "spif-driver.SPI_MOSI":"P0_9",
+            "spif-driver.SPI_MISO":"P0_8",
+            "spif-driver.SPI_CLK":"P0_7",
+            "spif-driver.SPI_CS":"P4_29"
         }
     }
 }
