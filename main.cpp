@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "./TimerTPL5010/TimerTPL5010.h"
 #include "Sim7600Cellular.h"
 #include "USBSerial.h"
 
@@ -41,6 +42,7 @@ SPIFBlockDevice bd(MBED_CONF_SPIF_DRIVER_SPI_MOSI,
 static BufferedSerial mdm(MDM_TXD_PIN, MDM_RXD_PIN, 115200);
 ATCmdParser *_parser;
 Sim7600Cellular *modem;
+TimerTPL5010 tpl5010(WDT_WAKE_PIN, WDT_DONE_PIN);
 
 BufferedSerial rs232(ECARD_TX_PIN, ECARD_RX_PIN, 2400);
 ATCmdParser *xtc232;
@@ -54,13 +56,13 @@ DigitalIn mdm_status(MDM_STATUS_PIN);
 DigitalOut mdm_dtr(MDM_DTR_PIN);
 DigitalIn mdm_ri(MDM_RI_PIN);
 
-InterruptIn pwake(WDT_WAKE_PIN);
-DigitalOut pdone(WDT_DONE_PIN, 0);
+// InterruptIn pwake(WDT_WAKE_PIN);
+// DigitalOut pdone(WDT_DONE_PIN, 0);
 DigitalIn usb_det(USB_DET_PIN);
 
 BusIn dipsw(DIPSW_P4_PIN, DIPSW_P3_PIN, DIPSW_P2_PIN, DIPSW_P1_PIN);
 
-volatile bool isWake = false;
+// volatile bool isWake = false;
 volatile bool is_script_read = false;
 bool mdmOK = false;
 bool mdmAtt = false;
@@ -90,8 +92,10 @@ char str_sub_topic[128];
 
 Thread blink_thread, netstat_thread, capture_thread, usb_thread,
     mdm_notify_thread;
+Thread isr_thread(osPriorityAboveNormal, 0x400, nullptr, "isr_queue_thread");
+EventQueue isr_queue;
 
-init_script_t init_script;
+init_script_t init_script, iap_init_script;
 struct tm struct_tm;
 
 Base64 base64_obj;
@@ -403,12 +407,12 @@ void mdm_notify_routine() {
   }
 }
 
-void fall_wake() { isWake = true; }
-void kick_wdt() {
-  pdone = 1;
-  wait_us(10);
-  pdone = 0;
-}
+// void fall_wake() { isWake = true; }
+// void kick_wdt() {
+//   pdone = 1;
+//   wait_us(10);
+//   pdone = 0;
+// }
 
 void sync_rtc(char cclk[64]) {
   int qdiff = 0;
@@ -467,27 +471,48 @@ void ntp_sync() {
 int main() {
 
   // Initialise the digital pin LED1 as an output
-  kick_wdt();
+  //   kick_wdt();
   rtc_init();
   period_min = read_dipsw();
   if (period_min < 2) {
     period_min = 2;
   }
 
-  printf("\r\n\n-------------------------------------\r\n");
-  printf("| Hello,I am UPSMON_K22F_SIM7600E-H |\r\n");
-  printf("-------------------------------------\r\n");
+  if (period_min < 8) {
+    rtc_write(time_t(1686000000));
+  }
+
+  printf("\r\n\n----------------------------------------\r\n");
+  printf("| Hello,I am UPSMON_LPC1768_SIM7600E-H |\r\n");
+  printf("----------------------------------------\r\n");
   printf("Firmware Version: %s" CRLF, firmware_vers);
   printf("SystemCoreClock : %.3f MHz.\r\n", SystemCoreClock / 1000000.0);
   printf("timestamp : %d\r\n", (unsigned int)rtc_read());
   printf("capture period : %d minutes\r\n", period_min);
 
   read_initial_script();
+  initial_FlashIAPBlockDevice(&iap);
+
+  iap_to_script(&iap, &iap_init_script);
+  if (iap_init_script.topic_path[0] == 0xff) {
+    printf("iap is blank!!!\r\n");
+    script_to_iap(&iap, &init_script);
+  } else {
+    printf("topic: %s\r\n", iap_init_script.topic_path);
+    // printHEX((unsigned char *)&iap_init_script, sizeof(init_script_t));
+  }
+
+  isr_thread.start(callback(&isr_queue, &EventQueue::dispatch_forever));
+  tpl5010.init(&isr_queue);
+
   blink_thread.start(mbed::callback(blink_routine, &myled));
 
   if (!is_script_read) {
     blink_led(NOFILE);
   }
+
+  //   isr_thread.start(callback(&isr_queue, &EventQueue::dispatch_forever));
+  //   tpl5010.init(&isr_queue);
 
   _parser = new ATCmdParser(&mdm, "\r\n", 256, 8000);
   //_parser->debug_on(1);
@@ -609,14 +634,17 @@ int main() {
   usb_thread.start(callback(usb_passthrough));
   mdm_notify_thread.start(callback(mdm_notify_routine));
 
-  pwake.fall(&fall_wake);
+  //   pwake.fall(&fall_wake);
 
   while (true) {
 
-    if (isWake) {
-      kick_wdt();
-      printf("wakeup!!!\r\n");
-      isWake = false;
+    // if (isWake) {
+    //   kick_wdt();
+    //   printf("wakeup!!!\r\n");
+    //   isWake = false;
+    // }
+    if (tpl5010.get_wdt()) {
+      tpl5010.set_wdt(false);
     }
 
     mail_t *mail = mail_box.try_get_for(Kernel::Clock::duration(500));

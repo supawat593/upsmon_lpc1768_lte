@@ -1,6 +1,7 @@
 {
     "target_overrides":{
         "*":{
+            "rtos.main-thread-stack-size":"0x1000",
             "platform.stdio-baud-rate": 115200,
             "platform.callback-nontrivial": true,
             "platform.stdio-convert-newlines":true,
@@ -27,7 +28,9 @@
             "spif-driver.SPI_MOSI":"P0_9",
             "spif-driver.SPI_MISO":"P0_8",
             "spif-driver.SPI_CLK":"P0_7",
-            "spif-driver.SPI_CS":"P4_29"
+            "spif-driver.SPI_CS":"P0_6",
+            "flashiap-block-device.base-address": "0x070000",
+            "flashiap-block-device.size": "0x10000"
         }
     }
 }

@@ -1,6 +1,9 @@
+#include "FlashIAPBlockDevice.h"
 #include "devices_src.h"
 #include "mbed.h"
 
+#define iap_script_offset 0
+#define iap_startup_offset 0x8000 // 32768
 
 typedef enum { OFF = 0, IDLE, CONNECTED } netstat_mode;
 typedef enum { PWRON = 0, NORMAL, NOFILE } blink_mode;
@@ -11,7 +14,9 @@ typedef struct {
   float duty;
 } blink_t;
 
-Mutex mutex_idle_rs232, mutex_usb_cnnt, mutex_mdm_busy,mutex_notify;
+FlashIAPBlockDevice iap;
+
+Mutex mutex_idle_rs232, mutex_usb_cnnt, mutex_mdm_busy, mutex_notify;
 
 MemoryPool<int, 1> netstat_mpool;
 Queue<int, 1> netstat_queue;
@@ -189,4 +194,31 @@ void printHEX(unsigned char *msg, unsigned int len) {
   }
   printf("\r\n----------------------------------------------------------------"
          "\r\n");
+}
+
+void initial_FlashIAPBlockDevice(FlashIAPBlockDevice *_bd) {
+  printf("FlashIAPBlockDevice initialising\r\n");
+  //   _bd->init();
+  debug_if(_bd->init() != 0, "initial FlashIAP Fail!!!\r\n");
+  printf("FlashIAP block device size: %llu\r\n", _bd->size());
+  printf("FlashIAP block device program_size: %llu\r\n",
+         _bd->get_program_size());
+  printf("FlashIAP block device read_size: %llu\r\n", _bd->get_read_size());
+  printf("FlashIAP block device erase size: %llu\r\n", _bd->get_erase_size());
+}
+
+void script_to_iap(FlashIAPBlockDevice *_bd, init_script_t *_init) {
+  init_script_t *buffer = (init_script_t *)malloc(sizeof(init_script_t));
+  memcpy(buffer, _init, sizeof(init_script_t));
+
+  _bd->erase(iap_script_offset, _bd->get_erase_size());
+  _bd->program(buffer, iap_script_offset, _bd->get_erase_size());
+  free(buffer);
+}
+
+void iap_to_script(FlashIAPBlockDevice *_bd, init_script_t *_init) {
+  init_script_t *buffer = (init_script_t *)malloc(sizeof(init_script_t));
+  _bd->read(buffer, iap_script_offset, sizeof(init_script_t));
+  memcpy(_init, buffer, sizeof(init_script_t));
+  free(buffer);
 }

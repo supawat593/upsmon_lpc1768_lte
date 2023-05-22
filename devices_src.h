@@ -24,30 +24,29 @@
 
 #endif
 
-
 #if TARGET_LPC1768
 #define MDM_TXD_PIN P0_15
 #define MDM_RXD_PIN P0_16
-#define MDM_RI_PIN  P0_21
+#define MDM_RI_PIN P0_21
 #define MDM_DTR_PIN P0_20
 
-#define MDM_VRF_EN_PIN PTC8
-#define MDM_RST_PIN PTB1
-#define MDM_PWR_PIN PTB2
-#define MDM_FLIGHT_PIN PTC10
-#define MDM_STATUS_PIN PTC9
+#define MDM_VRF_EN_PIN P1_29
+#define MDM_RST_PIN P1_14
+#define MDM_PWR_PIN P1_10
+#define MDM_FLIGHT_PIN P1_25
+#define MDM_STATUS_PIN P1_24
 
 #define ECARD_TX_PIN P0_10
 #define ECARD_RX_PIN P0_11
 
-#define WDT_WAKE_PIN P2_5
-#define WDT_DONE_PIN P2_4
-#define USB_DET_PIN  P1_31
+#define WDT_WAKE_PIN P2_1
+#define WDT_DONE_PIN P2_0
+#define USB_DET_PIN P1_31
 
-#define DIPSW_P1_PIN P2_0
-#define DIPSW_P2_PIN P2_1
-#define DIPSW_P3_PIN P2_2
-#define DIPSW_P4_PIN P2_3
+#define DIPSW_P1_PIN P2_3
+#define DIPSW_P2_PIN P2_4
+#define DIPSW_P3_PIN P2_5
+#define DIPSW_P4_PIN P2_6
 
 #endif
 
@@ -68,10 +67,10 @@ const char *str_ret[] = {
     "NO_RESP2",
     "NO_RESP3"};
 
-char init_cfg_pattern[] = {
-    "%*[^\n]\nBroker: \"%[^\"]\"\nPort: %d\nKey: \"%[^\"]\"\nTopic: \"%[^\"]\"\nCommand: "
-    "[%[^]]]\nModel: \"%[^\"]\"\nSite_ID: "
-    "\"%[^\"]\"\n%*s"};
+char init_cfg_pattern[] = {"%*[^\n]\nBroker: \"%[^\"]\"\nPort: %d\nKey: "
+                           "\"%[^\"]\"\nTopic: \"%[^\"]\"\nCommand: "
+                           "[%[^]]]\nModel: \"%[^\"]\"\nSite_ID: "
+                           "\"%[^\"]\"\n%*s"};
 
 char init_cfg_write[] = {
     "#Configuration file for UPS Monitor\r\n\r\nSTART:\r\nBroker: "
