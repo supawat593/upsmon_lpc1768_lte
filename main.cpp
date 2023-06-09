@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// #include "devices_src.h"
 #include "mbed.h"
 #include "upsmon_rtos.h"
 #include <chrono>
@@ -19,7 +18,7 @@
 
 #include "Base64.h"
 
-#define firmware_vers "640106"
+#define firmware_vers "660106"
 #define Dev_Group "LTE"
 
 #define INITIAL_APP_FILE "initial_script.txt"
@@ -407,13 +406,6 @@ void mdm_notify_routine() {
   }
 }
 
-// void fall_wake() { isWake = true; }
-// void kick_wdt() {
-//   pdone = 1;
-//   wait_us(10);
-//   pdone = 0;
-// }
-
 void sync_rtc(char cclk[64]) {
   int qdiff = 0;
   char chdiff[4];
@@ -637,7 +629,6 @@ int main() {
   //   pwake.fall(&fall_wake);
 
   while (true) {
-
     // if (isWake) {
     //   kick_wdt();
     //   printf("wakeup!!!\r\n");
@@ -1021,14 +1012,31 @@ void apply_script(FILE *file) {
     printf("    siteID: %s" CRLF, init_script.siteID);
     printf("<---------------------------------------->\r\n\n");
 
-    size_t len_key_encode = (size_t)strlen(key_encoded);
-    size_t len_key_decode;
-    char *key_decode1 =
-        base64_obj.Decode(key_encoded, len_key_encode, &len_key_decode);
+    // size_t len_key_encode = (size_t)strlen(key_encoded);
+    // size_t len_key_decode;
+    // char *key_decode1 =
+    //     base64_obj.Decode(key_encoded, len_key_encode, &len_key_decode);
 
-    size_t len_key_decode2;
-    char *key_decode2 =
-        base64_obj.Decode(key_decode1, len_key_decode, &len_key_decode2);
+    // size_t len_key_decode2;
+    // char *key_decode2 =
+    //     base64_obj.Decode(key_decode1, len_key_decode, &len_key_decode2);
+
+    char key_encoded2[64];
+    char *key_decode2;
+    strcpy(key_encoded2, key_encoded);
+
+    size_t len_key_encode = (size_t)strlen(key_encoded2);
+    size_t len_key_decode;
+
+    for (int ix = 0; ix < 2; ix++) {
+      key_decode2 =
+          base64_obj.Decode(key_encoded2, len_key_encode, &len_key_decode);
+
+      len_key_encode = len_key_decode;
+      strcpy(key_encoded2, key_decode2);
+    }
+
+    // printf("key_decode2= %s\r\n\n", key_decode2);
 
     if (sscanf(key_decode2, "%[^ ] %[^\n]", init_script.usr, init_script.pwd) ==
         2) {

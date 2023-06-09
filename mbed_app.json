@@ -24,7 +24,7 @@
             "target.bootloader_supported":true,
             "target.bootloader_img":"../mbed_os_bootloader_upsmon/BUILD/LPC1768/ARMC6/mbed_os_bootloader_upsmon.bin",
             "target.app_offset":"0x18000",
-            "spif-driver.SPI_FREQ":"8000000",
+            "spif-driver.SPI_FREQ":"16000000",
             "spif-driver.SPI_MOSI":"P0_9",
             "spif-driver.SPI_MISO":"P0_8",
             "spif-driver.SPI_CLK":"P0_7",
