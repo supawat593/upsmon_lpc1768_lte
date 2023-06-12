@@ -20,4 +20,13 @@ typedef struct {
   char siteID[32];
 } init_script_t;
 
+typedef struct {
+  char imei[16];
+  char iccid[20];
+  char ipaddr[32];
+  char dns_ip[16];
+  int sig;
+  int ber;
+} __attribute__((__packed__)) cellular_data_t;
+
 #endif

@@ -10,7 +10,8 @@
 #include <cstring>
 
 #include "./TimerTPL5010/TimerTPL5010.h"
-#include "Sim7600Cellular.h"
+// #include "Sim7600Cellular.h"
+#include "./CellularService/CellularService.h"
 #include "USBSerial.h"
 
 #include "FATFileSystem.h"
@@ -18,12 +19,12 @@
 
 #include "Base64.h"
 
-#define firmware_vers "660106"
-#define Dev_Group "LTE"
+// #define firmware_vers "660103"
+// #define Dev_Group "LTE"
 
-#define INITIAL_APP_FILE "initial_script.txt"
-#define SPIF_MOUNT_PATH "spif"
-#define FULL_SCRIPT_FILE_PATH "/" SPIF_MOUNT_PATH "/" INITIAL_APP_FILE
+// #define INITIAL_APP_FILE "initial_script.txt"
+// #define SPIF_MOUNT_PATH "spif"
+// #define FULL_SCRIPT_FILE_PATH "/" SPIF_MOUNT_PATH "/" INITIAL_APP_FILE
 
 // Blinking rate in milliseconds
 #define BLINKING_RATE 500ms
@@ -40,7 +41,8 @@ SPIFBlockDevice bd(MBED_CONF_SPIF_DRIVER_SPI_MOSI,
 // static UnbufferedSerial pc(USBTX, USBRX);
 static BufferedSerial mdm(MDM_TXD_PIN, MDM_RXD_PIN, 115200);
 ATCmdParser *_parser;
-Sim7600Cellular *modem;
+// Sim7600Cellular *modem;
+CellularService *modem;
 TimerTPL5010 tpl5010(WDT_WAKE_PIN, WDT_DONE_PIN);
 
 BufferedSerial rs232(ECARD_TX_PIN, ECARD_RX_PIN, 2400);
@@ -70,16 +72,16 @@ bool bmqtt_cnt = false;
 bool bmqtt_sub = false;
 
 int period_min = 0;
-int sig = 0, ber = 0;
+// int sig = 0, ber = 0;
 
-unsigned int last_ntp_sync = 0;
+int last_ntp_sync = 0;
 unsigned int last_rtc_check_NW = 0;
 unsigned int rtc_uptime = 0;
 
-char imei[16];
-char iccid[20];
-char ipaddr[32];
-char dns_ip[16];
+// char imei[16];
+// char iccid[20];
+// char ipaddr[32];
+// char dns_ip[16];
 
 char encode_key[64];
 char revID[20];
@@ -95,12 +97,16 @@ Thread isr_thread(osPriorityAboveNormal, 0x400, nullptr, "isr_queue_thread");
 EventQueue isr_queue;
 
 init_script_t init_script, iap_init_script;
-struct tm struct_tm;
+// struct tm struct_tm;
 
 Base64 base64_obj;
-
-int read_parser_to_char(char *tbuf, int size, char end);
-int read_xtc_to_char(char *tbuf, int size, char end);
+Timer tm2;
+int read_sys_time() {
+  return duration_cast<chrono::milliseconds>(tm2.elapsed_time()).count();
+}
+// int read_parser_to_char(char *tbuf, int size, char end);
+// int read_xtc_to_char(char *tbuf, int size, char end);
+int read_xparser_to_char(char *tbuf, int size, char end, ATCmdParser *_xparser);
 void read_initial_script();
 void apply_script(FILE *file);
 void device_stat_update(const char *stat_mode = "NORMAL");
@@ -182,7 +188,8 @@ void usb_passthrough() {
           //   b = rs232.read(&b, 1);
           //   pc2.write(&b, 1);
           memset(str_usb_ret, 0, 128);
-          read_xtc_to_char(str_usb_ret, 128, '\r');
+          //   read_xtc_to_char(str_usb_ret, 128, '\r');
+          read_xparser_to_char(str_usb_ret, 128, '\r', xtc232);
           pc2.printf("%s\r", str_usb_ret);
         }
       }
@@ -237,7 +244,8 @@ void capture_thread_routine() {
       xtc232->flush();
       xtc232->send(mail->cmd);
 
-      read_xtc_to_char(ret_rs232, 128, '\r');
+      //   read_xtc_to_char(ret_rs232, 128, '\r');
+      read_xparser_to_char(ret_rs232, 128, '\r', xtc232);
       //   strcpy(ret_rs232, str_ret[j]);
 
       if (strlen(ret_rs232) > 0) {
@@ -406,59 +414,60 @@ void mdm_notify_routine() {
   }
 }
 
-void sync_rtc(char cclk[64]) {
-  int qdiff = 0;
-  char chdiff[4];
-  // 20/11/02,00:17:48+28
-  printf("sync_rtc(\"%s\")\r\n", cclk);
-  sscanf(cclk, "%d/%d/%d,%d:%d:%d%s", &struct_tm.tm_year, &struct_tm.tm_mon,
-         &struct_tm.tm_mday, &struct_tm.tm_hour, &struct_tm.tm_min,
-         &struct_tm.tm_sec, chdiff);
-  /*
-      struct_tm.tm_sec=second;
-      struct_tm.tm_min=minute;
-      struct_tm.tm_hour=hour;
-      struct_tm.tm_mday=day;
-      struct_tm.tm_mon=month-1;
-      struct_tm.tm_year=year+100;  //+2000-1900
-  */
-  qdiff = atoi(chdiff);
-  qdiff /= 4;
+// void sync_rtc(char cclk[64]) {
+//   int qdiff = 0;
+//   char chdiff[4];
+//   // 20/11/02,00:17:48+28
+//   printf("sync_rtc(\"%s\")\r\n", cclk);
+//   sscanf(cclk, "%d/%d/%d,%d:%d:%d%s", &struct_tm.tm_year, &struct_tm.tm_mon,
+//          &struct_tm.tm_mday, &struct_tm.tm_hour, &struct_tm.tm_min,
+//          &struct_tm.tm_sec, chdiff);
+//   /*
+//       struct_tm.tm_sec=second;
+//       struct_tm.tm_min=minute;
+//       struct_tm.tm_hour=hour;
+//       struct_tm.tm_mday=day;
+//       struct_tm.tm_mon=month-1;
+//       struct_tm.tm_year=year+100;  //+2000-1900
+//   */
+//   qdiff = atoi(chdiff);
+//   qdiff /= 4;
 
-  struct_tm.tm_mon -= 1;
-  struct_tm.tm_year += 100;
+//   struct_tm.tm_mon -= 1;
+//   struct_tm.tm_year += 100;
 
-  time_t sec_rtc = mktime(&struct_tm);
+//   time_t sec_rtc = mktime(&struct_tm);
 
-  unsigned int temp = 0;
-  temp = (unsigned int)sec_rtc - (qdiff * 3600);
-  sec_rtc = (time_t)temp;
+//   unsigned int temp = 0;
+//   temp = (unsigned int)sec_rtc - (qdiff * 3600);
+//   sec_rtc = (time_t)temp;
 
-  if ((int)sec_rtc > 0) {
-    rtc_write(sec_rtc);
-  }
-}
+//   if ((int)sec_rtc > 0) {
+//     rtc_write(sec_rtc);
+//   }
+// }
 
-void ntp_sync() {
+// void ntp_sync() {
 
-  if (_parser->send("AT+CNTP=\"time1.google.com\",28") && _parser->recv("OK")) {
-    printf("set ntp server Done\r\n");
-    char ret_ntp[64];
+//   if (_parser->send("AT+CNTP=\"time1.google.com\",28") &&
+//   _parser->recv("OK")) {
+//     printf("set ntp server Done\r\n");
+//     char ret_ntp[64];
 
-    if (_parser->send("AT+CNTP?") &&
-        _parser->scanf("+CNTP: %[^\n]\r\n", ret_ntp)) {
-      printf("ret_ntp--> +CNTP: %s\r\n", ret_ntp);
-      _parser->set_timeout(15000);
+//     if (_parser->send("AT+CNTP?") &&
+//         _parser->scanf("+CNTP: %[^\n]\r\n", ret_ntp)) {
+//       printf("ret_ntp--> +CNTP: %s\r\n", ret_ntp);
+//       _parser->set_timeout(15000);
 
-      if (_parser->send("AT+CNTP") && _parser->recv("+CNTP: 0")) {
-        //   if (_parser->send("AT+CNTP") && _parser->recv("OK")) {
-        printf("NTP: Operation succeeded\r\n");
-        last_ntp_sync = (unsigned int)rtc_read();
-      }
-      _parser->set_timeout(8000);
-    }
-  }
-}
+//       if (_parser->send("AT+CNTP") && _parser->recv("+CNTP: 0")) {
+//         //   if (_parser->send("AT+CNTP") && _parser->recv("OK")) {
+//         printf("NTP: Operation succeeded\r\n");
+//         last_ntp_sync = (unsigned int)rtc_read();
+//       }
+//       _parser->set_timeout(8000);
+//     }
+//   }
+// }
 
 int main() {
 
@@ -508,101 +517,133 @@ int main() {
 
   _parser = new ATCmdParser(&mdm, "\r\n", 256, 8000);
   //_parser->debug_on(1);
-  modem = new Sim7600Cellular(_parser);
+  //   modem = new Sim7600Cellular(_parser);
+  modem = new CellularService(_parser, vrf_en, mdm_rst);
   // modem=new Sim7600Cellular(PTD3,PTD2);
 
   xtc232 = new ATCmdParser(&rs232, "\r", 256, 1000);
   ThisThread::sleep_for(500ms);
-  vrf_en = 1;
-  rtc_uptime = (unsigned int)rtc_read();
+  //   vrf_en = 1;
+  modem->vrf_enable(1);
+  //   rtc_uptime = (unsigned int)rtc_read();
 
-  while (mdm_status.read() && ((unsigned int)rtc_read() - rtc_uptime < 18))
+  //   while (mdm_status.read() && ((unsigned int)rtc_read() - rtc_uptime < 18))
+  //     ;
+
+  //   if ((unsigned int)rtc_read() - rtc_uptime > 18) {
+  //     printf("MDM_STAT Timeout : %d sec.\r\n",
+  //            (unsigned int)rtc_read() - rtc_uptime);
+  //     rtc_uptime = (unsigned int)rtc_read();
+  //   }
+  tm2.start();
+  int sys_time_ms = read_sys_time();
+
+  while (mdm_status.read() && (read_sys_time() - sys_time_ms < 18000))
     ;
+  debug_if(read_sys_time() - sys_time_ms > 18000,
+           "MDM_STAT Timeout : %d sec.\r\n", read_sys_time() - sys_time_ms);
 
-  if ((unsigned int)rtc_read() - rtc_uptime > 18) {
-    printf("MDM_STAT Timeout : %d sec.\r\n",
-           (unsigned int)rtc_read() - rtc_uptime);
-    rtc_uptime = (unsigned int)rtc_read();
-  }
-  mdmOK = modem->check_modem_status();
+  //   if (read_sys_time() - sys_time_ms > 18000) {
+  //     printf("MDM_STAT Timeout : %d sec.\r\n", read_sys_time() -
+  //     sys_time_ms); sys_time_ms = read_sys_time();
+  //   }
 
-  if (mdmOK) {
-    printf("SIM7600 Status: Ready\r\n");
-    netstat_thread.start(callback(blip_netstat, &netstat));
+  sys_time_ms = read_sys_time();
+  tm2.stop();
+  netstat_thread.start(callback(blip_netstat, &netstat));
 
-    if (modem->enable_echo(0)) {
-
-      //   modem->set_min_cFunction();
-      //   ThisThread::sleep_for(1000ms);
-
-      //   if (modem->get_pref_Mode() == 2) {
-      //     modem->set_pref_Mode(54);
-      //     ThisThread::sleep_for(3000ms);
-      //     modem->get_pref_Mode();
-      //   }
-
-      if (!modem->save_setting()) {
-        printf("Save ME user setting : Fail!!!" CRLF);
-      }
-    }
+  if (is_script_read && modem->initial_NW()) {
+    netstat_led(CONNECTED);
   }
 
-  modem->get_revID(revID);
+  //   mdmOK = modem->check_modem_status();
 
-  modem->set_tz_update(0);
+  //   if (mdmOK) {
+  //     printf("SIM7600 Status: Ready\r\n");
+  //     netstat_thread.start(callback(blip_netstat, &netstat));
 
-  if (mdmOK && modem->set_full_FUNCTION()) {
-    modem->set_creg(2);
-    modem->set_cereg(2);
-  }
+  //     if (modem->enable_echo(0)) {
 
-  debug_if(modem->get_IMEI(imei), "imei=  %s\r\n", imei);
-  debug_if(modem->get_ICCID(iccid), "iccid=  %s\r\n", iccid);
+  //       //   modem->set_min_cFunction();
+  //       //   ThisThread::sleep_for(1000ms);
 
-  while (!mdmAtt) {
-    mdmAtt = modem->check_attachNW();
-    ThisThread::sleep_for(2000ms);
-  }
+  //       //   if (modem->get_pref_Mode() == 2) {
+  //       //     modem->set_pref_Mode(54);
+  //       //     ThisThread::sleep_for(3000ms);
+  //       //     modem->get_pref_Mode();
+  //       //   }
 
-  debug_if(mdmAtt, "NW Attached!!!\r\n");
-  debug_if(modem->get_csq(&sig, &ber), "sig=%d ber=%d\r\n", sig, ber);
+  //       if (!modem->save_setting()) {
+  //         printf("Save ME user setting : Fail!!!" CRLF);
+  //       }
+  //     }
+  //   }
 
-  while (modem->get_creg() != 1)
-    ;
+  //   modem->get_revID(revID);
 
-  if (modem->get_creg() > 0) {
-    printf("NW Registered!!!\r\n");
-    if (is_script_read) {
-      netstat_led(CONNECTED);
-    }
-  }
+  //   modem->set_tz_update(0);
 
-  ntp_sync();
+  //   if (mdmOK && modem->set_full_FUNCTION()) {
+  //     modem->set_creg(2);
+  //     modem->set_cereg(2);
+  //   }
+
+  //   debug_if(modem->get_IMEI(imei), "imei=  %s\r\n", imei);
+  //   debug_if(modem->get_ICCID(iccid), "iccid=  %s\r\n", iccid);
+
+  //   while (!mdmAtt) {
+  //     mdmAtt = modem->check_attachNW();
+  //     ThisThread::sleep_for(2000ms);
+  //   }
+
+  //   debug_if(mdmAtt, "NW Attached!!!\r\n");
+  //   debug_if(modem->get_csq(&sig, &ber), "sig=%d ber=%d\r\n", sig, ber);
+
+  //   while (modem->get_creg() != 1)
+  //     ;
+
+  //   if (modem->get_creg() > 0) {
+  //     printf("NW Registered!!!\r\n");
+  //     if (is_script_read) {
+  //       netstat_led(CONNECTED);
+  //     }
+  //   }
+
+  modem->ntp_sync(&last_ntp_sync);
 
   char cclk_msg[32];
   if (_parser->send("AT+CCLK?") &&
       _parser->scanf("+CCLK: \"%[^\"]\"\r\n", cclk_msg)) {
     printf("msg= %s\r\n", cclk_msg);
-    sync_rtc(cclk_msg);
+    // sync_rtc(cclk_msg);
+    modem->sync_rtc(cclk_msg);
     printf("timestamp : %d\r\n", (unsigned int)rtc_read());
   }
 
   last_rtc_check_NW = (unsigned int)rtc_read();
-  last_ntp_sync = (unsigned int)rtc_read();
+  last_ntp_sync = (int)rtc_read();
 
   bmqtt_start = modem->mqtt_start();
   debug_if(bmqtt_start, "MQTT Started\r\n");
 
   if (bmqtt_start) {
-    modem->mqtt_accquire_client(imei);
+    // modem->mqtt_accquire_client(imei);
+    modem->mqtt_accquire_client(modem->cell_info.imei);
 
-    if (modem->dns_resolve(init_script.broker, dns_ip) < 0) {
-      memset(dns_ip, 0, 16);
-      strcpy(dns_ip, mqtt_broker_ip);
+    // if (modem->dns_resolve(init_script.broker, dns_ip) < 0) {
+    //   memset(dns_ip, 0, 16);
+    //   strcpy(dns_ip, mqtt_broker_ip);
+    // }
+
+    // bmqtt_cnt = modem->mqtt_connect(dns_ip, init_script.usr, init_script.pwd,
+    //                                 init_script.port);
+    if (modem->dns_resolve(init_script.broker, modem->cell_info.dns_ip) < 0) {
+      memset(modem->cell_info.dns_ip, 0, 16);
+      strcpy(modem->cell_info.dns_ip, mqtt_broker_ip);
     }
 
-    bmqtt_cnt = modem->mqtt_connect(dns_ip, init_script.usr, init_script.pwd,
-                                    init_script.port);
+    bmqtt_cnt = modem->mqtt_connect(modem->cell_info.dns_ip, init_script.usr,
+                                    init_script.pwd, init_script.port);
     debug_if(bmqtt_cnt, "MQTT Connected\r\n");
     device_stat_update("RESTART");
   }
@@ -614,7 +655,8 @@ int main() {
 
   if (bmqtt_cnt) {
     memset(str_sub_topic, 0, 128);
-    sprintf(str_sub_topic, "%s/config/%s", init_script.topic_path, imei);
+    sprintf(str_sub_topic, "%s/config/%s", init_script.topic_path,
+            modem->cell_info.imei);
     bmqtt_sub = modem->mqtt_sub(str_sub_topic);
 
     // if (bmqtt_sub) {
@@ -646,9 +688,10 @@ int main() {
 
       memset(str_topic, 0, 128);
       memset(mqtt_msg, 0, 256);
-      sprintf(str_topic, "%s/data/%s", init_script.topic_path, imei);
-      sprintf(mqtt_msg, payload_pattern, imei, mail->utc, init_script.model,
-              init_script.siteID, mail->cmd, mail->resp);
+      sprintf(str_topic, "%s/data/%s", init_script.topic_path,
+              modem->cell_info.imei);
+      sprintf(mqtt_msg, payload_pattern, modem->cell_info.imei, mail->utc,
+              init_script.model, init_script.siteID, mail->cmd, mail->resp);
 
       if (bmqtt_cnt && (!get_mdm_busy())) {
         set_notify_ready(false);
@@ -681,9 +724,11 @@ int main() {
         // check AT>OK
         if (!modem->check_modem_status(10)) {
           netstat_led(OFF);
-          vrf_en = 0;
+          //   vrf_en = 0;
+          modem->vrf_enable(0);
           ThisThread::sleep_for(500ms);
-          vrf_en = 1;
+          //   vrf_en = 1;
+          modem->vrf_enable(1);
           bmqtt_start = false;
           bmqtt_cnt = false;
           bmqtt_sub = false;
@@ -720,11 +765,14 @@ int main() {
           if (_parser->send("AT+CCLK?") &&
               _parser->scanf("+CCLK: \"%[^\"]\"\r\n", msg)) {
             printf("msg= %s\r\n", msg);
-            sync_rtc(msg);
+            // sync_rtc(msg);
+            modem->sync_rtc(msg);
             printf("timestamp : %d\r\n", (unsigned int)rtc_read());
           }
 
-          debug_if(modem->get_csq(&sig, &ber), "sig=%d ber=%d\r\n", sig, ber);
+          debug_if(modem->get_csq(&modem->cell_info.sig, &modem->cell_info.ber),
+                   "sig=%d ber=%d\r\n", modem->cell_info.sig,
+                   modem->cell_info.ber);
           memset(msg_cpsi, 0, 128);
 
           debug_if(modem->get_cpsi(msg_cpsi), "cpsi=> %s\r\n", msg_cpsi);
@@ -733,7 +781,8 @@ int main() {
           if (mdmAtt && (modem->get_creg() == 1)) {
             netstat_led(CONNECTED);
 
-            debug_if(modem->get_IPAddr(ipaddr), "ipaddr= %s\r\n", ipaddr);
+            debug_if(modem->get_IPAddr(modem->cell_info.ipaddr),
+                     "ipaddr= %s\r\n", modem->cell_info.ipaddr);
 
             if (!bmqtt_start) {
               mdmAtt = modem->check_attachNW();
@@ -741,26 +790,27 @@ int main() {
 
                 netstat_led(CONNECTED);
 
-                if (modem->dns_resolve(init_script.broker, dns_ip) < 0) {
-                  memset(dns_ip, 0, 16);
-                  strcpy(dns_ip, mqtt_broker_ip);
+                if (modem->dns_resolve(init_script.broker,
+                                       modem->cell_info.dns_ip) < 0) {
+                  memset(modem->cell_info.dns_ip, 0, 16);
+                  strcpy(modem->cell_info.dns_ip, mqtt_broker_ip);
                 }
 
                 bmqtt_start = modem->mqtt_start();
                 debug_if(bmqtt_start, "MQTT Started\r\n");
 
                 if (bmqtt_start) {
-                  modem->mqtt_accquire_client(imei);
+                  modem->mqtt_accquire_client(modem->cell_info.imei);
 
-                  bmqtt_cnt =
-                      modem->mqtt_connect(dns_ip, init_script.usr,
-                                          init_script.pwd, init_script.port);
+                  bmqtt_cnt = modem->mqtt_connect(
+                      modem->cell_info.dns_ip, init_script.usr, init_script.pwd,
+                      init_script.port);
                   debug_if(bmqtt_cnt, "MQTT Connected\r\n");
 
                   if (bmqtt_cnt) {
                     memset(str_sub_topic, 0, 128);
                     sprintf(str_sub_topic, "%s/config/%s",
-                            init_script.topic_path, imei);
+                            init_script.topic_path, modem->cell_info.imei);
                     bmqtt_sub = modem->mqtt_sub(str_sub_topic);
                   }
                 }
@@ -770,13 +820,14 @@ int main() {
             if (modem->mqtt_connect_stat() < 1) {
               if (bmqtt_start) {
                 bmqtt_cnt = modem->mqtt_connect(
-                    dns_ip, init_script.usr, init_script.pwd, init_script.port);
+                    modem->cell_info.dns_ip, init_script.usr, init_script.pwd,
+                    init_script.port);
                 debug_if(bmqtt_cnt, "MQTT Connected\r\n");
 
                 if (bmqtt_cnt) {
                   memset(str_sub_topic, 0, 128);
                   sprintf(str_sub_topic, "%s/config/%s", init_script.topic_path,
-                          imei);
+                          modem->cell_info.imei);
                   bmqtt_sub = modem->mqtt_sub(str_sub_topic);
                 }
               }
@@ -793,9 +844,11 @@ int main() {
                 } else {
                   bmqtt_start = false;
                   netstat_led(OFF);
-                  mdm_rst = 1;
-                  ThisThread::sleep_for(500ms);
-                  mdm_rst = 0;
+                  //   mdm_rst = 1;
+                  //   ThisThread::sleep_for(500ms);
+                  //   mdm_rst = 0;
+                  modem->MDM_HW_reset();
+
                   printf("MQTT Stop Fail: Rebooting Modem!!!" CRLF);
 
                   rtc_uptime = (unsigned int)rtc_read();
@@ -835,8 +888,8 @@ int main() {
             // }
 
             if (((unsigned int)rtc_read() - last_ntp_sync) > 3600) {
-              ntp_sync();
-              last_ntp_sync = (unsigned int)rtc_read();
+              modem->ntp_sync(&last_ntp_sync);
+              last_ntp_sync = (int)rtc_read();
               device_stat_update();
             }
 
@@ -845,9 +898,11 @@ int main() {
             bmqtt_start = false;
             bmqtt_cnt = false;
             bmqtt_sub = false;
-            mdm_rst = 1;
-            ThisThread::sleep_for(500ms);
-            mdm_rst = 0;
+            // mdm_rst = 1;
+            // ThisThread::sleep_for(500ms);
+            // mdm_rst = 0;
+            modem->MDM_HW_reset();
+
             printf("NW Attaching Fail: Rebooting Modem!!!" CRLF);
 
             rtc_uptime = (unsigned int)rtc_read();
@@ -878,38 +933,64 @@ int main() {
   }     // end while(true)
 } // end main()
 
-int read_parser_to_char(char *tbuf, int size, char end) {
+// int read_parser_to_char(char *tbuf, int size, char end) {
+//   int count = 0;
+//   int x = 0;
+
+//   if (size > 0) {
+//     for (count = 0; (count < size) && (x >= 0) && (x != end); count++) {
+//       x = _parser->getc();
+//       *(tbuf + count) = (char)x;
+//     }
+
+//     count--;
+//     *(tbuf + count) = 0;
+
+//     // Convert line endings:
+//     // If end was '\n' (0x0a) and the preceding character was 0x0d, then
+//     // overwrite that with null as well.
+//     if ((count > 0) && (end == '\n') && (*(tbuf + count - 1) == '\x0d')) {
+//       count--;
+//       *(tbuf + count) = 0;
+//     }
+//   }
+
+//   return count;
+// }
+
+// int read_xtc_to_char(char *tbuf, int size, char end) {
+//   int count = 0;
+//   int x = 0;
+
+//   if (size > 0) {
+//     for (count = 0; (count < size) && (x >= 0) && (x != end); count++) {
+//       x = xtc232->getc();
+//       *(tbuf + count) = (char)x;
+//     }
+
+//     count--;
+//     *(tbuf + count) = 0;
+
+//     // Convert line endings:
+//     // If end was '\n' (0x0a) and the preceding character was 0x0d, then
+//     // overwrite that with null as well.
+//     if ((count > 0) && (end == '\n') && (*(tbuf + count - 1) == '\x0d')) {
+//       count--;
+//       *(tbuf + count) = 0;
+//     }
+//   }
+
+//   return count;
+// }
+
+int read_xparser_to_char(char *tbuf, int size, char end,
+                         ATCmdParser *_xparser) {
   int count = 0;
   int x = 0;
 
   if (size > 0) {
     for (count = 0; (count < size) && (x >= 0) && (x != end); count++) {
-      x = _parser->getc();
-      *(tbuf + count) = (char)x;
-    }
-
-    count--;
-    *(tbuf + count) = 0;
-
-    // Convert line endings:
-    // If end was '\n' (0x0a) and the preceding character was 0x0d, then
-    // overwrite that with null as well.
-    if ((count > 0) && (end == '\n') && (*(tbuf + count - 1) == '\x0d')) {
-      count--;
-      *(tbuf + count) = 0;
-    }
-  }
-
-  return count;
-}
-
-int read_xtc_to_char(char *tbuf, int size, char end) {
-  int count = 0;
-  int x = 0;
-
-  if (size > 0) {
-    for (count = 0; (count < size) && (x >= 0) && (x != end); count++) {
-      x = xtc232->getc();
+      x = _xparser->getc();
       *(tbuf + count) = (char)x;
     }
 
@@ -1061,18 +1142,20 @@ void device_stat_update(const char *stat_mode) {
     char cops_msg[64];
     char str_stat[15];
     strcpy(str_stat, stat_mode);
-    sprintf(stat_topic, "%s/status/%s", init_script.topic_path, imei);
+    sprintf(stat_topic, "%s/status/%s", init_script.topic_path,
+            modem->cell_info.imei);
     modem->set_cereg(2);
-    modem->get_csq(&sig, &ber);
+    modem->get_csq(&modem->cell_info.sig, &modem->cell_info.ber);
     modem->get_cops(cops_msg);
 
     memset(msg_cpsi, 0, 128);
     modem->get_cpsi(msg_cpsi);
 
     if (modem->get_cereg(cereg_msg) > 0) {
-      sprintf(stat_payload, stat_pattern, imei, (unsigned int)rtc_read(),
-              firmware_vers, Dev_Group, period_min, str_stat, sig, ber,
-              cops_msg, cereg_msg, msg_cpsi);
+      sprintf(stat_payload, stat_pattern, modem->cell_info.imei,
+              (unsigned int)rtc_read(), firmware_vers, Dev_Group, period_min,
+              str_stat, modem->cell_info.sig, modem->cell_info.ber, cops_msg,
+              cereg_msg, msg_cpsi);
       modem->mqtt_publish(stat_topic, stat_payload);
     }
   }

@@ -7,10 +7,12 @@ class Sim7600Cellular {
 
 public:
   Sim7600Cellular(ATCmdParser *_parser);
+  Sim7600Cellular(BufferedSerial *_serial);
   Sim7600Cellular(PinName tx, PinName rx);
   bool check_modem_status(int rty = 20);
   bool enable_echo(bool en);
   bool save_setting();
+  void ntp_sync(int *last_sync);
   bool check_attachNW();
   int set_cops(int mode = 0, int format = 2);
   int get_cops(char *cops);
@@ -20,7 +22,7 @@ public:
   int get_creg(char *payload);
   int set_cereg(int n);
   int get_cereg(char *payload);
-  bool set_full_FUNCTION(int rst=0);
+  bool set_full_FUNCTION(int rst = 0);
   bool set_min_cFunction();
   int get_revID(char *revid);
   int get_IMEI(char *simei);
@@ -50,7 +52,7 @@ public:
   bool mqtt_publish(char topic[128], char payload[512], int qos = 1,
                     int interval_s = 60);
   bool mqtt_sub(char topic[128], int clientindex = 0, int qos = 1);
-  bool mqtt_unsub(char topic[128], int clientindex = 0,int dup=0);
+  bool mqtt_unsub(char topic[128], int clientindex = 0, int dup = 0);
 
 private:
   ATCmdParser *_atc;

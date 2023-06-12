@@ -50,6 +50,13 @@
 
 #endif
 
+#define firmware_vers "660105"
+#define Dev_Group "LTE"
+
+#define INITIAL_APP_FILE "initial_script.txt"
+#define SPIF_MOUNT_PATH "spif"
+#define FULL_SCRIPT_FILE_PATH "/" SPIF_MOUNT_PATH "/" INITIAL_APP_FILE
+
 char mqtt_broker_ip[] = "188.166.189.39";
 // char mqtt_broker[] = "trueiot.io";
 // int mqtt_port = 1883;
@@ -95,4 +102,3 @@ char mqtt_sub_pattern[] = "+CMQTTRXSTART: %*d,%*d,%*d\r\n"
                           "+CMQTTRXPAYLOAD: %*d,%d\r\n"
                           "%[^\r]\r\n"
                           "+CMQTTRXEND: %d\r\n";
-
