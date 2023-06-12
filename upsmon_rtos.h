@@ -1,6 +1,8 @@
 #include "FlashIAPBlockDevice.h"
 #include "devices_src.h"
 #include "mbed.h"
+#include "typedef_src.h"
+
 
 #define iap_script_offset 0
 #define iap_startup_offset 0x8000 // 32768
