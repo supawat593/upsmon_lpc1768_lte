@@ -167,6 +167,18 @@ int Sim7600Cellular::get_csq(int *power, int *ber, int retry) {
   return -1;
 }
 
+int Sim7600Cellular::get_cclk(char *cclk) {
+  char ret_cclk[32];
+  if (_atc->send("AT+CCLK?") &&
+      _atc->scanf("+CCLK: \"%[^\"]\"\r\n", ret_cclk)) {
+    printf("msg= %s\r\n", ret_cclk);
+    strcpy(cclk, ret_cclk);
+    return 1;
+  }
+  strcpy(cclk, "");
+  return -1;
+}
+
 int Sim7600Cellular::set_creg(int n) {
   char cmd[10];
   sprintf(cmd, "AT+CREG=%d", n);
@@ -202,7 +214,6 @@ int Sim7600Cellular::get_creg(char *payload) {
   int n = 0;
   int stat = 0;
   char ret[20];
-
   if (_atc->send("AT+CREG?") && _atc->scanf("+CREG: %[^\n]\r\n", ret)) {
     printf("pattern found +CREG: %s\r\n", ret);
     // sscanf(ret,"%*d,%d",&stat);

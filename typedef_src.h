@@ -21,6 +21,7 @@ typedef struct {
 } init_script_t;
 
 typedef struct {
+  char revID[20];
   char imei[16];
   char iccid[20];
   char ipaddr[32];

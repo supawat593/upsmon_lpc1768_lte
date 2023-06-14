@@ -17,6 +17,7 @@ public:
   int set_cops(int mode = 0, int format = 2);
   int get_cops(char *cops);
   int get_csq(int *power, int *ber, int retry = 10);
+  int get_cclk(char *cclk);
   int set_creg(int n);
   int get_creg();
   int get_creg(char *payload);

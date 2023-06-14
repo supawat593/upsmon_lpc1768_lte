@@ -37,27 +37,28 @@ bool CellularService::MDM_HW_reset(void) {
 }
 
 bool CellularService::initial_NW() {
-//   vrf_en = 1;
-//   tm1.start();
-//   int sys_time_ms = read_sys_time();
+  //   vrf_en = 1;
+  //   tm1.start();
+  //   int sys_time_ms = read_sys_time();
 
-//   while ((read_sys_time() - sys_time_ms < 18000))
-//     ;
-//   debug_if(read_sys_time() - sys_time_ms > 18000,
-//            "MDM_STAT Timeout : %d sec.\r\n", read_sys_time() - sys_time_ms);
+  //   while ((read_sys_time() - sys_time_ms < 18000))
+  //     ;
+  //   debug_if(read_sys_time() - sys_time_ms > 18000,
+  //            "MDM_STAT Timeout : %d sec.\r\n", read_sys_time() -
+  //            sys_time_ms);
 
-//   //   if (read_sys_time() - sys_time_ms > 18000) {
-//   //     printf("MDM_STAT Timeout : %d sec.\r\n", read_sys_time() -
-//   //     sys_time_ms); sys_time_ms = read_sys_time();
-//   //   }
+  //   //   if (read_sys_time() - sys_time_ms > 18000) {
+  //   //     printf("MDM_STAT Timeout : %d sec.\r\n", read_sys_time() -
+  //   //     sys_time_ms); sys_time_ms = read_sys_time();
+  //   //   }
 
-//   sys_time_ms = read_sys_time();
-//   tm1.stop();
+  //   sys_time_ms = read_sys_time();
+  //   tm1.stop();
 
-  char revID[20];
-//   char imei[16];
-//   char iccid[20];
-//   int sig, ber;
+  //   char revID[20];
+  //   char imei[16];
+  //   char iccid[20];
+  //   int sig, ber;
   bool mdmAtt = false;
   bool mdmOK = this->check_modem_status();
 
@@ -71,17 +72,23 @@ bool CellularService::initial_NW() {
     }
   }
 
-  this->get_revID(revID);
+  this->get_revID(this->cell_info.revID);
 
   this->set_tz_update(0);
 
-  if (mdmOK && this->set_full_FUNCTION()) {
-    this->set_creg(2);
-    this->set_cereg(2);
+  //   if (mdmOK && this->set_full_FUNCTION()) {
+
+  //     this->set_creg(2);
+  //     this->set_cereg(2);
+  //   }
+
+  if (mdmOK) {
+    this->set_full_FUNCTION();
   }
 
-  debug_if(this->get_IMEI(cell_info.imei), "imei=  %s\r\n", cell_info.imei);
-  debug_if(this->get_ICCID(cell_info.iccid), "iccid=  %s\r\n", cell_info.iccid);
+  debug_if(this->get_IMEI(cell_info.imei) > 0, "imei=  %s\r\n", cell_info.imei);
+  debug_if(this->get_ICCID(cell_info.iccid) > 0, "iccid=  %s\r\n",
+           cell_info.iccid);
 
   while (!mdmAtt) {
     mdmAtt = this->check_attachNW();
@@ -89,7 +96,8 @@ bool CellularService::initial_NW() {
   }
 
   debug_if(mdmAtt, "NW Attached!!!\r\n");
-  debug_if(this->get_csq(&cell_info.sig, &cell_info.ber), "sig=%d ber=%d\r\n", cell_info.sig, cell_info.ber);
+  debug_if(this->get_csq(&cell_info.sig, &cell_info.ber), "sig=%d ber=%d\r\n",
+           cell_info.sig, cell_info.ber);
 
   while (this->get_creg() != 1)
     ;
@@ -132,6 +140,10 @@ void CellularService::sync_rtc(char cclk[64]) {
   if ((int)sec_rtc > 0) {
     rtc_write(sec_rtc);
   }
+}
+
+void CellularService::ctrl_timer(bool in = false) {
+  in ? tm1.start() : tm1.stop();
 }
 
 int CellularService::read_sys_time() {

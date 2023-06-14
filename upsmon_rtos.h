@@ -3,7 +3,6 @@
 #include "mbed.h"
 #include "typedef_src.h"
 
-
 #define iap_script_offset 0
 #define iap_startup_offset 0x8000 // 32768
 
@@ -90,7 +89,7 @@ void set_usb_cnnt(bool temp) {
 }
 
 void blip_netstat(DigitalOut *led) {
-  int led_state = 1;
+  int led_state = 0;
 
   while (true) {
     int *net_queue;

@@ -6,3 +6,5 @@ mbed-os
 BUILD
 
 Base64
+*.rar
+*.zip

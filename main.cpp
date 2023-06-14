@@ -14,17 +14,11 @@
 #include "./CellularService/CellularService.h"
 #include "USBSerial.h"
 
+#include "./ExtStorage/ExtStorage.h"
 #include "FATFileSystem.h"
 #include "SPIFBlockDevice.h"
 
 #include "Base64.h"
-
-// #define firmware_vers "660103"
-// #define Dev_Group "LTE"
-
-// #define INITIAL_APP_FILE "initial_script.txt"
-// #define SPIF_MOUNT_PATH "spif"
-// #define FULL_SCRIPT_FILE_PATH "/" SPIF_MOUNT_PATH "/" INITIAL_APP_FILE
 
 // Blinking rate in milliseconds
 #define BLINKING_RATE 500ms
@@ -37,6 +31,7 @@ FATFileSystem fs(SPIF_MOUNT_PATH);
 SPIFBlockDevice bd(MBED_CONF_SPIF_DRIVER_SPI_MOSI,
                    MBED_CONF_SPIF_DRIVER_SPI_MISO,
                    MBED_CONF_SPIF_DRIVER_SPI_CLK, MBED_CONF_SPIF_DRIVER_SPI_CS);
+ExtStorage ext(&bd, &fs);
 
 // static UnbufferedSerial pc(USBTX, USBRX);
 static BufferedSerial mdm(MDM_TXD_PIN, MDM_RXD_PIN, 115200);
@@ -77,22 +72,20 @@ int period_min = 0;
 int last_ntp_sync = 0;
 unsigned int last_rtc_check_NW = 0;
 unsigned int rtc_uptime = 0;
-
-// char imei[16];
-// char iccid[20];
-// char ipaddr[32];
-// char dns_ip[16];
+char cclk_msg[32];
 
 char encode_key[64];
-char revID[20];
-char ret_cgdcont[128];
+// char revID[20];
+// char ret_cgdcont[128];
 char msg_cpsi[128];
 char str_topic[128];
 char mqtt_msg[256];
 char str_sub_topic[128];
 
-Thread blink_thread, netstat_thread, capture_thread, usb_thread,
-    mdm_notify_thread;
+Thread blink_thread(osPriorityNormal, 0x100, nullptr, "blink_thread"),
+    netstat_thread(osPriorityNormal, 0x100, nullptr, "netstat_thread"),
+    capture_thread, usb_thread,
+    mdm_notify_thread(osPriorityNormal, 0x1000, nullptr, "mdm_notify_thread");
 Thread isr_thread(osPriorityAboveNormal, 0x400, nullptr, "isr_queue_thread");
 EventQueue isr_queue;
 
@@ -100,12 +93,7 @@ init_script_t init_script, iap_init_script;
 // struct tm struct_tm;
 
 Base64 base64_obj;
-Timer tm2;
-int read_sys_time() {
-  return duration_cast<chrono::milliseconds>(tm2.elapsed_time()).count();
-}
-// int read_parser_to_char(char *tbuf, int size, char end);
-// int read_xtc_to_char(char *tbuf, int size, char end);
+
 int read_xparser_to_char(char *tbuf, int size, char end, ATCmdParser *_xparser);
 void read_initial_script();
 void apply_script(FILE *file);
@@ -390,7 +378,7 @@ void mdm_notify_routine() {
             printf("client_idx=%d\r\n", client_idx);
             printf("------------------------------------------------- >\r\n");
           }
-          script_config_process(sub_payload);
+          //   script_config_process(sub_payload); //disable script_cfg
 
         } else if (detection_notify("+CEREG:", mdm_xbuf, xbuf_trim)) {
           printf("Notify msg: %s\r\n", xbuf_trim);
@@ -414,61 +402,6 @@ void mdm_notify_routine() {
   }
 }
 
-// void sync_rtc(char cclk[64]) {
-//   int qdiff = 0;
-//   char chdiff[4];
-//   // 20/11/02,00:17:48+28
-//   printf("sync_rtc(\"%s\")\r\n", cclk);
-//   sscanf(cclk, "%d/%d/%d,%d:%d:%d%s", &struct_tm.tm_year, &struct_tm.tm_mon,
-//          &struct_tm.tm_mday, &struct_tm.tm_hour, &struct_tm.tm_min,
-//          &struct_tm.tm_sec, chdiff);
-//   /*
-//       struct_tm.tm_sec=second;
-//       struct_tm.tm_min=minute;
-//       struct_tm.tm_hour=hour;
-//       struct_tm.tm_mday=day;
-//       struct_tm.tm_mon=month-1;
-//       struct_tm.tm_year=year+100;  //+2000-1900
-//   */
-//   qdiff = atoi(chdiff);
-//   qdiff /= 4;
-
-//   struct_tm.tm_mon -= 1;
-//   struct_tm.tm_year += 100;
-
-//   time_t sec_rtc = mktime(&struct_tm);
-
-//   unsigned int temp = 0;
-//   temp = (unsigned int)sec_rtc - (qdiff * 3600);
-//   sec_rtc = (time_t)temp;
-
-//   if ((int)sec_rtc > 0) {
-//     rtc_write(sec_rtc);
-//   }
-// }
-
-// void ntp_sync() {
-
-//   if (_parser->send("AT+CNTP=\"time1.google.com\",28") &&
-//   _parser->recv("OK")) {
-//     printf("set ntp server Done\r\n");
-//     char ret_ntp[64];
-
-//     if (_parser->send("AT+CNTP?") &&
-//         _parser->scanf("+CNTP: %[^\n]\r\n", ret_ntp)) {
-//       printf("ret_ntp--> +CNTP: %s\r\n", ret_ntp);
-//       _parser->set_timeout(15000);
-
-//       if (_parser->send("AT+CNTP") && _parser->recv("+CNTP: 0")) {
-//         //   if (_parser->send("AT+CNTP") && _parser->recv("OK")) {
-//         printf("NTP: Operation succeeded\r\n");
-//         last_ntp_sync = (unsigned int)rtc_read();
-//       }
-//       _parser->set_timeout(8000);
-//     }
-//   }
-// }
-
 int main() {
 
   // Initialise the digital pin LED1 as an output
@@ -479,10 +412,6 @@ int main() {
     period_min = 2;
   }
 
-  if (period_min < 8) {
-    rtc_write(time_t(1686000000));
-  }
-
   printf("\r\n\n----------------------------------------\r\n");
   printf("| Hello,I am UPSMON_LPC1768_SIM7600E-H |\r\n");
   printf("----------------------------------------\r\n");
@@ -491,24 +420,30 @@ int main() {
   printf("timestamp : %d\r\n", (unsigned int)rtc_read());
   printf("capture period : %d minutes\r\n", period_min);
 
-  read_initial_script();
-  initial_FlashIAPBlockDevice(&iap);
+  //   read_initial_script();
+  ext.init();
+  ext.read_init_script(&init_script, FULL_SCRIPT_FILE_PATH);
+  //   initial_FlashIAPBlockDevice(&iap);
 
-  iap_to_script(&iap, &iap_init_script);
-  if (iap_init_script.topic_path[0] == 0xff) {
-    printf("iap is blank!!!\r\n");
-    script_to_iap(&iap, &init_script);
-  } else {
-    printf("topic: %s\r\n", iap_init_script.topic_path);
-    // printHEX((unsigned char *)&iap_init_script, sizeof(init_script_t));
-  }
+  //   iap_to_script(&iap, &iap_init_script);
+  //   if (iap_init_script.topic_path[0] == 0xff) {
+  //     printf("iap is blank!!!\r\n");
+  //     script_to_iap(&iap, &init_script);
+  //   } else {
+  //     printf("topic: %s\r\n", iap_init_script.topic_path);
+  //     // printHEX((unsigned char *)&iap_init_script, sizeof(init_script_t));
+  //   }
 
   isr_thread.start(callback(&isr_queue, &EventQueue::dispatch_forever));
   tpl5010.init(&isr_queue);
 
   blink_thread.start(mbed::callback(blink_routine, &myled));
+  netstat_thread.start(callback(blip_netstat, &netstat));
 
-  if (!is_script_read) {
+  //   if (!is_script_read) {
+  //     blink_led(NOFILE);
+  //   }
+  if (!ext.get_script_flag()) {
     blink_led(NOFILE);
   }
 
@@ -516,106 +451,45 @@ int main() {
   //   tpl5010.init(&isr_queue);
 
   _parser = new ATCmdParser(&mdm, "\r\n", 256, 8000);
-  //_parser->debug_on(1);
-  //   modem = new Sim7600Cellular(_parser);
   modem = new CellularService(_parser, vrf_en, mdm_rst);
-  // modem=new Sim7600Cellular(PTD3,PTD2);
 
   xtc232 = new ATCmdParser(&rs232, "\r", 256, 1000);
   ThisThread::sleep_for(500ms);
-  //   vrf_en = 1;
+
   modem->vrf_enable(1);
-  //   rtc_uptime = (unsigned int)rtc_read();
+  modem->ctrl_timer(1);
+  int sys_time_ms = modem->read_sys_time();
 
-  //   while (mdm_status.read() && ((unsigned int)rtc_read() - rtc_uptime < 18))
-  //     ;
+  while (mdm_status.read() && (modem->read_sys_time() - sys_time_ms < 18000))
+    ThisThread::sleep_for(250ms);
 
-  //   if ((unsigned int)rtc_read() - rtc_uptime > 18) {
-  //     printf("MDM_STAT Timeout : %d sec.\r\n",
-  //            (unsigned int)rtc_read() - rtc_uptime);
-  //     rtc_uptime = (unsigned int)rtc_read();
+  debug_if(modem->read_sys_time() - sys_time_ms > 18000,
+           "MDM_STAT Timeout : %d sec.\r\n",
+           modem->read_sys_time() - sys_time_ms);
+
+  sys_time_ms = modem->read_sys_time();
+  modem->ctrl_timer(0);
+  modem->check_modem_status(3) ? netstat_led(IDLE) : netstat_led(OFF);
+  //   netstat_thread.start(callback(blip_netstat, &netstat));
+
+  //   if (is_script_read && modem->initial_NW()) {
+  //     netstat_led(CONNECTED);
   //   }
-  tm2.start();
-  int sys_time_ms = read_sys_time();
-
-  while (mdm_status.read() && (read_sys_time() - sys_time_ms < 18000))
-    ;
-  debug_if(read_sys_time() - sys_time_ms > 18000,
-           "MDM_STAT Timeout : %d sec.\r\n", read_sys_time() - sys_time_ms);
-
-  //   if (read_sys_time() - sys_time_ms > 18000) {
-  //     printf("MDM_STAT Timeout : %d sec.\r\n", read_sys_time() -
-  //     sys_time_ms); sys_time_ms = read_sys_time();
-  //   }
-
-  sys_time_ms = read_sys_time();
-  tm2.stop();
-  netstat_thread.start(callback(blip_netstat, &netstat));
-
-  if (is_script_read && modem->initial_NW()) {
+  if (ext.get_script_flag() && modem->initial_NW()) {
     netstat_led(CONNECTED);
   }
 
-  //   mdmOK = modem->check_modem_status();
-
-  //   if (mdmOK) {
-  //     printf("SIM7600 Status: Ready\r\n");
-  //     netstat_thread.start(callback(blip_netstat, &netstat));
-
-  //     if (modem->enable_echo(0)) {
-
-  //       //   modem->set_min_cFunction();
-  //       //   ThisThread::sleep_for(1000ms);
-
-  //       //   if (modem->get_pref_Mode() == 2) {
-  //       //     modem->set_pref_Mode(54);
-  //       //     ThisThread::sleep_for(3000ms);
-  //       //     modem->get_pref_Mode();
-  //       //   }
-
-  //       if (!modem->save_setting()) {
-  //         printf("Save ME user setting : Fail!!!" CRLF);
-  //       }
-  //     }
-  //   }
-
-  //   modem->get_revID(revID);
-
-  //   modem->set_tz_update(0);
-
-  //   if (mdmOK && modem->set_full_FUNCTION()) {
-  //     modem->set_creg(2);
-  //     modem->set_cereg(2);
-  //   }
-
-  //   debug_if(modem->get_IMEI(imei), "imei=  %s\r\n", imei);
-  //   debug_if(modem->get_ICCID(iccid), "iccid=  %s\r\n", iccid);
-
-  //   while (!mdmAtt) {
-  //     mdmAtt = modem->check_attachNW();
-  //     ThisThread::sleep_for(2000ms);
-  //   }
-
-  //   debug_if(mdmAtt, "NW Attached!!!\r\n");
-  //   debug_if(modem->get_csq(&sig, &ber), "sig=%d ber=%d\r\n", sig, ber);
-
-  //   while (modem->get_creg() != 1)
-  //     ;
-
-  //   if (modem->get_creg() > 0) {
-  //     printf("NW Registered!!!\r\n");
-  //     if (is_script_read) {
-  //       netstat_led(CONNECTED);
-  //     }
-  //   }
-
   modem->ntp_sync(&last_ntp_sync);
 
-  char cclk_msg[32];
-  if (_parser->send("AT+CCLK?") &&
-      _parser->scanf("+CCLK: \"%[^\"]\"\r\n", cclk_msg)) {
-    printf("msg= %s\r\n", cclk_msg);
-    // sync_rtc(cclk_msg);
+  //   char cclk_msg[32];
+  //   if (_parser->send("AT+CCLK?") &&
+  //       _parser->scanf("+CCLK: \"%[^\"]\"\r\n", cclk_msg)) {
+  //     printf("msg= %s\r\n", cclk_msg);
+  //     // sync_rtc(cclk_msg);
+  //     modem->sync_rtc(cclk_msg);
+  //     printf("timestamp : %d\r\n", (unsigned int)rtc_read());
+  //   }
+  if (modem->get_cclk(cclk_msg)) {
     modem->sync_rtc(cclk_msg);
     printf("timestamp : %d\r\n", (unsigned int)rtc_read());
   }
@@ -630,13 +504,6 @@ int main() {
     // modem->mqtt_accquire_client(imei);
     modem->mqtt_accquire_client(modem->cell_info.imei);
 
-    // if (modem->dns_resolve(init_script.broker, dns_ip) < 0) {
-    //   memset(dns_ip, 0, 16);
-    //   strcpy(dns_ip, mqtt_broker_ip);
-    // }
-
-    // bmqtt_cnt = modem->mqtt_connect(dns_ip, init_script.usr, init_script.pwd,
-    //                                 init_script.port);
     if (modem->dns_resolve(init_script.broker, modem->cell_info.dns_ip) < 0) {
       memset(modem->cell_info.dns_ip, 0, 16);
       strcpy(modem->cell_info.dns_ip, mqtt_broker_ip);
@@ -648,10 +515,16 @@ int main() {
     device_stat_update("RESTART");
   }
 
-  if (is_script_read) {
+  //   if (is_script_read) {
+  //     blink_led(NORMAL); //  normal Mode
+  //     set_mdm_busy(false);
+  //   }
+  if (ext.get_script_flag()) {
     blink_led(NORMAL); //  normal Mode
     set_mdm_busy(false);
   }
+
+  mdm_notify_thread.start(callback(mdm_notify_routine));
 
   if (bmqtt_cnt) {
     memset(str_sub_topic, 0, 128);
@@ -664,18 +537,14 @@ int main() {
     // }
   }
 
-  capture_thread.start(callback(capture_thread_routine));
-  usb_thread.start(callback(usb_passthrough));
-  mdm_notify_thread.start(callback(mdm_notify_routine));
+  //   capture_thread.start(callback(capture_thread_routine));
+  //   usb_thread.start(callback(usb_passthrough));
+  //   mdm_notify_thread.start(callback(mdm_notify_routine));
 
   //   pwake.fall(&fall_wake);
 
   while (true) {
-    // if (isWake) {
-    //   kick_wdt();
-    //   printf("wakeup!!!\r\n");
-    //   isWake = false;
-    // }
+
     if (tpl5010.get_wdt()) {
       tpl5010.set_wdt(false);
     }
@@ -860,8 +729,8 @@ int main() {
                     printf("Restart Modem Complete : AT Ready!!!" CRLF);
                     modem->set_cops();
                     modem->set_full_FUNCTION();
-                    modem->set_creg(2);
-                    modem->set_cereg(2);
+                    // modem->set_creg(2);
+                    // modem->set_cereg(2);
                     netstat_led(IDLE);
                   }
                 }
@@ -914,8 +783,8 @@ int main() {
               printf("Restart Modem Complete : AT Ready!!!" CRLF);
               modem->set_cops();
               modem->set_full_FUNCTION();
-              modem->set_creg(2);
-              modem->set_cereg(2);
+              //   modem->set_creg(2);
+              //   modem->set_cereg(2);
               netstat_led(IDLE);
             }
           }

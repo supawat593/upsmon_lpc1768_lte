@@ -15,6 +15,8 @@ public:
   bool MDM_HW_reset(void);
   bool initial_NW();
   void sync_rtc(char cclk[64]);
+  void ctrl_timer(bool in);
+  int read_sys_time();
 
 private:
   Timer tm1;
@@ -22,8 +24,6 @@ private:
   DigitalOut &mdm_rst;
 
   struct tm struct_tm;
-
-  int read_sys_time();
 };
 
 #endif
