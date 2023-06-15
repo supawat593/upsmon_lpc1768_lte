@@ -171,7 +171,7 @@ int Sim7600Cellular::get_cclk(char *cclk) {
   char ret_cclk[32];
   if (_atc->send("AT+CCLK?") &&
       _atc->scanf("+CCLK: \"%[^\"]\"\r\n", ret_cclk)) {
-    printf("msg= %s\r\n", ret_cclk);
+    // printf("msg= %s\r\n", ret_cclk);
     strcpy(cclk, ret_cclk);
     return 1;
   }
@@ -766,4 +766,29 @@ bool Sim7600Cellular::mqtt_unsub(char topic[128], int clientindex, int dup) {
 
   _atc->set_timeout(8000);
   return false;
+}
+
+int Sim7600Cellular::read_atc_to_char(char *tbuf, int size, char end) {
+  int count = 0;
+  int x = 0;
+
+  if (size > 0) {
+    for (count = 0; (count < size) && (x >= 0) && (x != end); count++) {
+      x = _atc->getc();
+      *(tbuf + count) = (char)x;
+    }
+
+    count--;
+    *(tbuf + count) = 0;
+
+    // Convert line endings:
+    // If end was '\n' (0x0a) and the preceding character was 0x0d, then
+    // overwrite that with null as well.
+    if ((count > 0) && (end == '\n') && (*(tbuf + count - 1) == '\x0d')) {
+      count--;
+      *(tbuf + count) = 0;
+    }
+  }
+
+  return count;
 }

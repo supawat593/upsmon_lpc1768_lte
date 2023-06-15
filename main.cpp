@@ -75,8 +75,6 @@ unsigned int rtc_uptime = 0;
 char cclk_msg[32];
 
 char encode_key[64];
-// char revID[20];
-// char ret_cgdcont[128];
 char msg_cpsi[128];
 char str_topic[128];
 char mqtt_msg[256];
@@ -95,10 +93,7 @@ init_script_t init_script, iap_init_script;
 Base64 base64_obj;
 
 int read_xparser_to_char(char *tbuf, int size, char end, ATCmdParser *_xparser);
-void read_initial_script();
-void apply_script(FILE *file);
 void device_stat_update(const char *stat_mode = "NORMAL");
-void write_init_script();
 
 uint8_t read_dipsw() { return (~dipsw.read()) & 0x0f; }
 
@@ -334,7 +329,9 @@ void script_config_process(char cfg_msg[512]) {
   }
 
   if (cfg_success > 0) {
-    write_init_script();
+    // write_init_script();
+    ext.write_init_script(&init_script, FULL_SCRIPT_FILE_PATH);
+    ext.deinit();
     system_reset();
   }
 }
@@ -353,34 +350,60 @@ void mdm_notify_routine() {
   while (true) {
     // if (get_notify_ready() && (!get_mdm_busy()) && mdm.readable()) {
     if (get_notify_ready() && (!get_mdm_busy())) {
+
       if (mdm.readable()) {
+
         set_mdm_busy(true);
         memset(mdm_xbuf, 0, 512);
         memset(xbuf_trim, 0, 512);
 
-        // _parser->debug_on(1);
-        _parser->set_timeout(1000);
-        _parser->read(mdm_xbuf, 512);
-        //   read_parser_to_char(mdm_xbuf, 512, '\n');
-        _parser->set_timeout(8000);
-        // _parser->debug_on(0);
-
+        // modem->read_atc_to_char(mdm_xbuf, 512, '\r');
+        read_xparser_to_char(mdm_xbuf, 512, '\r', _parser);
         if (detection_notify("+CMQTTRXSTART:", mdm_xbuf, xbuf_trim)) {
 
-          if (sscanf(xbuf_trim, mqtt_sub_pattern, &len_topic, sub_topic,
-                     &len_payload, sub_payload, &client_idx) == 5) {
-            printf(
-                "\r\n< -------------------------------------------------\r\n");
-            printf("len_topic=%d\r\n", len_topic);
-            printf("sub_topic=%s\r\n", sub_topic);
-            printf("len_payload=%d\r\n", len_payload);
-            printf("sub_payload=%s\r\n", sub_payload);
-            printf("client_idx=%d\r\n", client_idx);
-            printf("------------------------------------------------- >\r\n");
-          }
-          //   script_config_process(sub_payload); //disable script_cfg
+          printf("Notify msg: %s\r\n", xbuf_trim);
+          int len_buf = 512;
+          if (sscanf(xbuf_trim, "+CMQTTRXSTART: %*d,%d,%d", &len_topic,
+                     &len_payload) == 2) {
 
-        } else if (detection_notify("+CEREG:", mdm_xbuf, xbuf_trim)) {
+            len_buf = (len_topic + len_payload) << 1;
+          }
+          //   debug_if(len_buf < 512, "len_buf=%d\r\n", len_buf);
+
+          memset(mdm_xbuf, 0, len_buf);
+          memset(xbuf_trim, 0, len_buf);
+
+          _parser->set_timeout(500);
+          _parser->read(mdm_xbuf, len_buf);
+          _parser->set_timeout(8000);
+          st = 0;
+          while ((strncmp(&mdm_xbuf[st], "+CMQTTRXTOPIC", 13) != 0) &&
+                 (st < (len_buf - 13))) {
+            st++;
+          }
+
+          if (st < (len_buf - 13)) {
+
+            memcpy(&xbuf_trim[0], &mdm_xbuf[st], sizeof(mdm_xbuf) - st);
+            // printf("Notify msg: %s\r\n", xbuf_trim);
+            if (sscanf(xbuf_trim, mqtt_sub_topic_pattern, &len_topic, sub_topic,
+                       &len_payload, sub_payload, &client_idx) == 5) {
+
+              printf(
+                  "\r\n<-------------------------------------------------\r\n");
+              printf("len_topic=%d\r\n", len_topic);
+              printf("sub_topic=%s\r\n", sub_topic);
+              printf("len_payload=%d\r\n", len_payload);
+              printf("sub_payload=%s\r\n", sub_payload);
+              printf("client_idx=%d\r\n", client_idx);
+              printf("------------------------------------------------->\r\n");
+              script_config_process(sub_payload); // disable script_cfg
+            }
+          }
+
+        }
+
+        else if (detection_notify("+CEREG:", mdm_xbuf, xbuf_trim)) {
           printf("Notify msg: %s\r\n", xbuf_trim);
         } else if (detection_notify("+CREG:", mdm_xbuf, xbuf_trim)) {
           printf("Notify msg: %s\r\n", xbuf_trim);
@@ -481,14 +504,6 @@ int main() {
 
   modem->ntp_sync(&last_ntp_sync);
 
-  //   char cclk_msg[32];
-  //   if (_parser->send("AT+CCLK?") &&
-  //       _parser->scanf("+CCLK: \"%[^\"]\"\r\n", cclk_msg)) {
-  //     printf("msg= %s\r\n", cclk_msg);
-  //     // sync_rtc(cclk_msg);
-  //     modem->sync_rtc(cclk_msg);
-  //     printf("timestamp : %d\r\n", (unsigned int)rtc_read());
-  //   }
   if (modem->get_cclk(cclk_msg)) {
     modem->sync_rtc(cclk_msg);
     printf("timestamp : %d\r\n", (unsigned int)rtc_read());
@@ -629,13 +644,10 @@ int main() {
           }
 
         } else {
-          char msg[32];
 
-          if (_parser->send("AT+CCLK?") &&
-              _parser->scanf("+CCLK: \"%[^\"]\"\r\n", msg)) {
-            printf("msg= %s\r\n", msg);
-            // sync_rtc(msg);
-            modem->sync_rtc(msg);
+          memset(cclk_msg, 0, 32);
+          if (modem->get_cclk(cclk_msg)) {
+            modem->sync_rtc(cclk_msg);
             printf("timestamp : %d\r\n", (unsigned int)rtc_read());
           }
 
@@ -802,56 +814,6 @@ int main() {
   }     // end while(true)
 } // end main()
 
-// int read_parser_to_char(char *tbuf, int size, char end) {
-//   int count = 0;
-//   int x = 0;
-
-//   if (size > 0) {
-//     for (count = 0; (count < size) && (x >= 0) && (x != end); count++) {
-//       x = _parser->getc();
-//       *(tbuf + count) = (char)x;
-//     }
-
-//     count--;
-//     *(tbuf + count) = 0;
-
-//     // Convert line endings:
-//     // If end was '\n' (0x0a) and the preceding character was 0x0d, then
-//     // overwrite that with null as well.
-//     if ((count > 0) && (end == '\n') && (*(tbuf + count - 1) == '\x0d')) {
-//       count--;
-//       *(tbuf + count) = 0;
-//     }
-//   }
-
-//   return count;
-// }
-
-// int read_xtc_to_char(char *tbuf, int size, char end) {
-//   int count = 0;
-//   int x = 0;
-
-//   if (size > 0) {
-//     for (count = 0; (count < size) && (x >= 0) && (x != end); count++) {
-//       x = xtc232->getc();
-//       *(tbuf + count) = (char)x;
-//     }
-
-//     count--;
-//     *(tbuf + count) = 0;
-
-//     // Convert line endings:
-//     // If end was '\n' (0x0a) and the preceding character was 0x0d, then
-//     // overwrite that with null as well.
-//     if ((count > 0) && (end == '\n') && (*(tbuf + count - 1) == '\x0d')) {
-//       count--;
-//       *(tbuf + count) = 0;
-//     }
-//   }
-
-//   return count;
-// }
-
 int read_xparser_to_char(char *tbuf, int size, char end,
                          ATCmdParser *_xparser) {
   int count = 0;
@@ -876,131 +838,6 @@ int read_xparser_to_char(char *tbuf, int size, char end,
   }
 
   return count;
-}
-
-void read_initial_script() {
-
-  bd.init();
-  int err = fs.mount(&bd);
-
-  if (err) {
-    printf("%s filesystem mount failed\r\n", fs.getName());
-  }
-
-  FILE *file = fopen(FULL_SCRIPT_FILE_PATH, "r");
-
-  if (file != NULL) {
-    printf("initial script found\r\n");
-
-    // apply_update(file, POST_APPLICATION_ADDR );
-    apply_script(file);
-    // remove(FULL_UPDATE_FILE_PATH);
-  }
-  //  else {
-  //     printf("No update found to apply\r\n");
-  // }
-
-  fs.unmount();
-  bd.deinit();
-}
-
-void apply_script(FILE *file) {
-  fseek(file, 0, SEEK_END);
-  long len = ftell(file);
-  printf("initial script file size is %ld bytes\r\n", len);
-  fseek(file, 0, SEEK_SET);
-
-  int result = 0;
-  // allocate memory to contain the whole file:
-  char *buffer = (char *)malloc(sizeof(char) * len);
-  if (buffer == NULL) {
-    printf("malloc : Memory error" CRLF);
-  }
-
-  // copy the file into the buffer:
-  result = fread(buffer, 1, len, file);
-  if (result != len) {
-    printf("file %s : Reading error" CRLF, FULL_SCRIPT_FILE_PATH);
-  }
-
-  //   printHEX((unsigned char *)buffer, len);
-  //   printf("buffer -> \r\n%s\r\n\n", buffer);
-
-  char script_buff[len];
-  int idx = 0;
-  while ((strncmp(&buffer[idx], "START:", 6) != 0) && (idx < len - 6)) {
-    idx++;
-  }
-  if (idx < len) {
-    memcpy(&script_buff, &buffer[idx], len - idx);
-    // printf("script_buf: %s" CRLF, script_buff);
-  }
-
-  char key_encoded[64];
-
-  //   if (sscanf(script_buff, init_cfg_pattern, init_script.broker,
-  //              &init_script.port, init_script.usr, init_script.pwd,
-  //              init_script.topic_path, init_script.full_cmd,
-  //              init_script.model, init_script.siteID) == 8) {
-  if (sscanf(script_buff, init_cfg_pattern, init_script.broker,
-             &init_script.port, key_encoded, init_script.topic_path,
-             init_script.full_cmd, init_script.model,
-             init_script.siteID) == 7) {
-    if (init_script.topic_path[strlen(init_script.topic_path) - 1] == '/') {
-      init_script.topic_path[strlen(init_script.topic_path) - 1] = '\0';
-    }
-
-    printf("\r\n<---------------------------------------->\r\n");
-    printf("    broker: %s" CRLF, init_script.broker);
-    printf("    port: %d" CRLF, init_script.port);
-    printf("    Key: %s" CRLF, key_encoded);
-    // printf("    usr: %s" CRLF, init_script.usr);
-    // printf("    pwd: %s" CRLF, init_script.pwd);
-    printf("    topic_path: %s" CRLF, init_script.topic_path);
-    printf("    full_cmd: %s" CRLF, init_script.full_cmd);
-    printf("    model: %s" CRLF, init_script.model);
-    printf("    siteID: %s" CRLF, init_script.siteID);
-    printf("<---------------------------------------->\r\n\n");
-
-    // size_t len_key_encode = (size_t)strlen(key_encoded);
-    // size_t len_key_decode;
-    // char *key_decode1 =
-    //     base64_obj.Decode(key_encoded, len_key_encode, &len_key_decode);
-
-    // size_t len_key_decode2;
-    // char *key_decode2 =
-    //     base64_obj.Decode(key_decode1, len_key_decode, &len_key_decode2);
-
-    char key_encoded2[64];
-    char *key_decode2;
-    strcpy(key_encoded2, key_encoded);
-
-    size_t len_key_encode = (size_t)strlen(key_encoded2);
-    size_t len_key_decode;
-
-    for (int ix = 0; ix < 2; ix++) {
-      key_decode2 =
-          base64_obj.Decode(key_encoded2, len_key_encode, &len_key_decode);
-
-      len_key_encode = len_key_decode;
-      strcpy(key_encoded2, key_decode2);
-    }
-
-    // printf("key_decode2= %s\r\n\n", key_decode2);
-
-    if (sscanf(key_decode2, "%[^ ] %[^\n]", init_script.usr, init_script.pwd) ==
-        2) {
-      //   printf("usr=%s pwd=%s\r\n", init_script.usr, init_script.pwd);
-      is_script_read = true;
-      strcpy(encode_key, key_encoded);
-    }
-  }
-
-  /* the whole file is now loaded in the memory buffer. */
-
-  // terminate
-  fclose(file);
-  free(buffer);
 }
 
 void device_stat_update(const char *stat_mode) {
@@ -1028,35 +865,4 @@ void device_stat_update(const char *stat_mode) {
       modem->mqtt_publish(stat_topic, stat_payload);
     }
   }
-}
-
-void write_init_script() {
-  bd.init();
-  int err = fs.mount(&bd);
-
-  if (err) {
-    printf("%s filesystem mount failed\r\n", fs.getName());
-  }
-
-  FILE *file = fopen(FULL_SCRIPT_FILE_PATH, "w");
-
-  if (file != NULL) {
-    printf("initial script found\r\n");
-    char fbuffer[512];
-    sprintf(fbuffer, init_cfg_write, init_script.broker, init_script.port,
-            encode_key, init_script.topic_path, init_script.full_cmd,
-            init_script.model, init_script.siteID);
-
-    // sprintf(fbuffer, "Hello : %d\r\n",15);
-
-    printf("------------- fbuffer ------------- >\r\n%s\r\n< "
-           "--------------------------\r\n",
-           fbuffer);
-    fprintf(file, fbuffer);
-  }
-
-  fclose(file);
-
-  fs.unmount();
-  bd.deinit();
 }

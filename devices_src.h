@@ -96,9 +96,14 @@ char stat_pattern[] =
 char dummy_msg[] =
     "(224.4 000.0 000.0 204.0 220.5 000 000 50.9 385 380 108.4 24.0 IM";
 
-char mqtt_sub_pattern[] = "+CMQTTRXSTART: %*d,%*d,%*d\r\n"
-                          "+CMQTTRXTOPIC: %*d,%d\r\n"
-                          "%[^\r]\r\n"
-                          "+CMQTTRXPAYLOAD: %*d,%d\r\n"
-                          "%[^\r]\r\n"
-                          "+CMQTTRXEND: %d\r\n";
+// char mqtt_sub_pattern[] = "+CMQTTRXSTART: %*d,%*d,%*d\r\n"
+//                           "+CMQTTRXTOPIC: %*d,%d\r\n"
+//                           "%[^\r]\r\n"
+//                           "+CMQTTRXPAYLOAD: %*d,%d\r\n"
+//                           "%[^\r]\r\n"
+//                           "+CMQTTRXEND: %d\r\n";
+char mqtt_sub_topic_pattern[] = "+CMQTTRXTOPIC: %*d,%d\r\n"
+                                "%[^\r]\r\n"
+                                "+CMQTTRXPAYLOAD: %*d,%d\r\n"
+                                "%[^\r]\r\n"
+                                "+CMQTTRXEND: %d\r\n";

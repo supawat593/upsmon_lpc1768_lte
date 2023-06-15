@@ -55,6 +55,8 @@ public:
   bool mqtt_sub(char topic[128], int clientindex = 0, int qos = 1);
   bool mqtt_unsub(char topic[128], int clientindex = 0, int dup = 0);
 
+  int read_atc_to_char(char *tbuf, int size, char end);
+
 private:
   ATCmdParser *_atc;
   BufferedSerial *serial;
