@@ -32,6 +32,16 @@ volatile bool is_idle_rs232 = true;
 volatile bool is_mdm_busy = true;
 volatile bool is_notify_ready = false;
 
+void printout_mqttsub_notify(rx_notify_t *data) {
+  printf("<-------------------------------------------------\r\n");
+  printf("len_topic=%d\r\n", data->len_topic);
+  printf("sub_topic=%s\r\n", data->sub_topic);
+  printf("len_payload=%d\r\n", data->len_payload);
+  printf("sub_payload=%s\r\n", data->sub_payload);
+  printf("client_idx=%d\r\n", data->client_idx);
+  printf("------------------------------------------------->\r\n");
+}
+
 bool get_notify_ready() {
   bool temp;
   mutex_notify.lock();

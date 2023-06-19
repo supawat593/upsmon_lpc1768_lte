@@ -22,12 +22,11 @@ public:
 private:
   FILE *file;
   Mutex file_mtx;
-  Base64 base64_objx;
+  Base64 base64;
 
   BlockDevice *bd;
   FATFileSystem *fs;
 
-  char encode_xkey[128];
   volatile bool is_script_read;
 };
 

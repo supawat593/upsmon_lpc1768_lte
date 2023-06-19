@@ -67,15 +67,11 @@ bool bmqtt_cnt = false;
 bool bmqtt_sub = false;
 
 int period_min = 0;
-// int sig = 0, ber = 0;
 
 int last_ntp_sync = 0;
 unsigned int last_rtc_check_NW = 0;
 unsigned int rtc_uptime = 0;
-char cclk_msg[32];
 
-char encode_key[64];
-char msg_cpsi[128];
 char str_topic[128];
 char mqtt_msg[256];
 char str_sub_topic[128];
@@ -88,7 +84,6 @@ Thread isr_thread(osPriorityAboveNormal, 0x400, nullptr, "isr_queue_thread");
 EventQueue isr_queue;
 
 init_script_t init_script, iap_init_script;
-// struct tm struct_tm;
 
 Base64 base64_obj;
 
@@ -275,7 +270,7 @@ void capture_thread_routine() {
   }
 }
 
-void script_config_process(char cfg_msg[512]) {
+int script_config_process(char cfg_msg[512], init_script_t *_script) {
   char str_cmd[10][100];
   char raw_key[64];
   char delim[] = "&";
@@ -294,6 +289,8 @@ void script_config_process(char cfg_msg[512]) {
   int cfg_success = 0;
 
   for (int i = 0; i < n_cmd; i++) {
+
+    debug("str_cmd[%d] ---> %s\r\n", i, str_cmd[i]);
     if (sscanf(str_cmd[i], "Command: [%[^]]]", init_script.full_cmd) == 1) {
       cfg_success++;
     } else if (sscanf(str_cmd[i], "Topic: \"%[^\"]\"",
@@ -306,20 +303,27 @@ void script_config_process(char cfg_msg[512]) {
                1) {
       cfg_success++;
     } else if (sscanf(str_cmd[i], "Key: \"%[^\"]\"", raw_key) == 1) {
+
       char raw_usr[16], raw_pwd[16];
+      char key_encoded2[64];
+      char *key_decode2;
+      strcpy(key_encoded2, raw_key);
 
-      size_t len_key_encode = (size_t)strlen(raw_key);
+      size_t len_key_encode = (size_t)strlen(key_encoded2);
       size_t len_key_decode;
-      char *key_decode1 =
-          base64_obj.Decode(raw_key, len_key_encode, &len_key_decode);
 
-      size_t len_key_decode2;
-      char *key_decode2 =
-          base64_obj.Decode(key_decode1, len_key_decode, &len_key_decode2);
+      for (int ix = 0; ix < 2; ix++) {
+        key_decode2 =
+            base64_obj.Decode(key_encoded2, len_key_encode, &len_key_decode);
+
+        len_key_encode = len_key_decode;
+        strcpy(key_encoded2, key_decode2);
+      }
 
       if (sscanf(key_decode2, "%[^ ] %[^\n]", raw_usr, raw_pwd) == 2) {
-        memset(encode_key, 0, 64);
-        strcpy(encode_key, raw_key);
+
+        memset(init_script.encoded_key, 0, 64);
+        memcpy(&init_script.encoded_key, &raw_key, strlen(raw_key));
         printf("configuration process: Key Changed" CRLF);
         cfg_success++;
       }
@@ -328,21 +332,14 @@ void script_config_process(char cfg_msg[512]) {
     }
   }
 
-  if (cfg_success > 0) {
-    // write_init_script();
-    ext.write_init_script(&init_script, FULL_SCRIPT_FILE_PATH);
-    ext.deinit();
-    system_reset();
-  }
+  return cfg_success;
 }
 
 void mdm_notify_routine() {
   printf("mdm_notify_routine() started --->\r\n");
   char mdm_xbuf[512];
   char xbuf_trim[512];
-  char sub_topic[128];
-  char sub_payload[256];
-  int client_idx = 0;
+
   int len_topic = 0;
   int len_payload = 0;
   int st = 0, end = 0;
@@ -386,18 +383,21 @@ void mdm_notify_routine() {
 
             memcpy(&xbuf_trim[0], &mdm_xbuf[st], sizeof(mdm_xbuf) - st);
             // printf("Notify msg: %s\r\n", xbuf_trim);
-            if (sscanf(xbuf_trim, mqtt_sub_topic_pattern, &len_topic, sub_topic,
-                       &len_payload, sub_payload, &client_idx) == 5) {
+            static rx_notify_t rx_mqttsub_msg = {"\0", "\0", 0, 0, 0};
+            if (sscanf(xbuf_trim, mqtt_sub_topic_pattern,
+                       &rx_mqttsub_msg.len_topic, rx_mqttsub_msg.sub_topic,
+                       &rx_mqttsub_msg.len_payload, rx_mqttsub_msg.sub_payload,
+                       &rx_mqttsub_msg.client_idx) == 5) {
 
-              printf(
-                  "\r\n<-------------------------------------------------\r\n");
-              printf("len_topic=%d\r\n", len_topic);
-              printf("sub_topic=%s\r\n", sub_topic);
-              printf("len_payload=%d\r\n", len_payload);
-              printf("sub_payload=%s\r\n", sub_payload);
-              printf("client_idx=%d\r\n", client_idx);
-              printf("------------------------------------------------->\r\n");
-              script_config_process(sub_payload); // disable script_cfg
+              printout_mqttsub_notify(&rx_mqttsub_msg);
+
+              if (script_config_process(rx_mqttsub_msg.sub_payload,
+                                        &init_script) > 0) {
+
+                ext.write_init_script(&init_script, FULL_SCRIPT_FILE_PATH);
+                ext.deinit();
+                system_reset();
+              }
             }
           }
 
@@ -443,7 +443,6 @@ int main() {
   printf("timestamp : %d\r\n", (unsigned int)rtc_read());
   printf("capture period : %d minutes\r\n", period_min);
 
-  //   read_initial_script();
   ext.init();
   ext.read_init_script(&init_script, FULL_SCRIPT_FILE_PATH);
   //   initial_FlashIAPBlockDevice(&iap);
@@ -463,15 +462,9 @@ int main() {
   blink_thread.start(mbed::callback(blink_routine, &myled));
   netstat_thread.start(callback(blip_netstat, &netstat));
 
-  //   if (!is_script_read) {
-  //     blink_led(NOFILE);
-  //   }
   if (!ext.get_script_flag()) {
     blink_led(NOFILE);
   }
-
-  //   isr_thread.start(callback(&isr_queue, &EventQueue::dispatch_forever));
-  //   tpl5010.init(&isr_queue);
 
   _parser = new ATCmdParser(&mdm, "\r\n", 256, 8000);
   modem = new CellularService(_parser, vrf_en, mdm_rst);
@@ -504,8 +497,8 @@ int main() {
 
   modem->ntp_sync(&last_ntp_sync);
 
-  if (modem->get_cclk(cclk_msg)) {
-    modem->sync_rtc(cclk_msg);
+  if (modem->get_cclk(modem->cell_info.cclk_msg)) {
+    modem->sync_rtc(modem->cell_info.cclk_msg);
     printf("timestamp : %d\r\n", (unsigned int)rtc_read());
   }
 
@@ -516,7 +509,7 @@ int main() {
   debug_if(bmqtt_start, "MQTT Started\r\n");
 
   if (bmqtt_start) {
-    // modem->mqtt_accquire_client(imei);
+
     modem->mqtt_accquire_client(modem->cell_info.imei);
 
     if (modem->dns_resolve(init_script.broker, modem->cell_info.dns_ip) < 0) {
@@ -530,10 +523,6 @@ int main() {
     device_stat_update("RESTART");
   }
 
-  //   if (is_script_read) {
-  //     blink_led(NORMAL); //  normal Mode
-  //     set_mdm_busy(false);
-  //   }
   if (ext.get_script_flag()) {
     blink_led(NORMAL); //  normal Mode
     set_mdm_busy(false);
@@ -645,18 +634,19 @@ int main() {
 
         } else {
 
-          memset(cclk_msg, 0, 32);
-          if (modem->get_cclk(cclk_msg)) {
-            modem->sync_rtc(cclk_msg);
+          memset(modem->cell_info.cclk_msg, 0, 32);
+          if (modem->get_cclk(modem->cell_info.cclk_msg)) {
+            modem->sync_rtc(modem->cell_info.cclk_msg);
             printf("timestamp : %d\r\n", (unsigned int)rtc_read());
           }
 
           debug_if(modem->get_csq(&modem->cell_info.sig, &modem->cell_info.ber),
                    "sig=%d ber=%d\r\n", modem->cell_info.sig,
                    modem->cell_info.ber);
-          memset(msg_cpsi, 0, 128);
+          memset(modem->cell_info.cpsi_msg, 0, 128);
 
-          debug_if(modem->get_cpsi(msg_cpsi), "cpsi=> %s\r\n", msg_cpsi);
+          debug_if(modem->get_cpsi(modem->cell_info.cpsi_msg), "cpsi=> %s\r\n",
+                   modem->cell_info.cpsi_msg);
 
           mdmAtt = modem->check_attachNW();
           if (mdmAtt && (modem->get_creg() == 1)) {
@@ -723,13 +713,10 @@ int main() {
                 if (modem->mqtt_stop()) {
                   bmqtt_start = false;
                 } else {
+
                   bmqtt_start = false;
                   netstat_led(OFF);
-                  //   mdm_rst = 1;
-                  //   ThisThread::sleep_for(500ms);
-                  //   mdm_rst = 0;
                   modem->MDM_HW_reset();
-
                   printf("MQTT Stop Fail: Rebooting Modem!!!" CRLF);
 
                   rtc_uptime = (unsigned int)rtc_read();
@@ -844,24 +831,25 @@ void device_stat_update(const char *stat_mode) {
   if (bmqtt_cnt) {
     char stat_payload[512];
     char stat_topic[128];
-    char cereg_msg[64];
-    char cops_msg[64];
+    // char cereg_msg[64];
+    // char cops_msg[64];
     char str_stat[15];
     strcpy(str_stat, stat_mode);
     sprintf(stat_topic, "%s/status/%s", init_script.topic_path,
             modem->cell_info.imei);
     modem->set_cereg(2);
     modem->get_csq(&modem->cell_info.sig, &modem->cell_info.ber);
-    modem->get_cops(cops_msg);
+    modem->get_cops(modem->cell_info.cops_msg);
 
-    memset(msg_cpsi, 0, 128);
-    modem->get_cpsi(msg_cpsi);
+    memset(modem->cell_info.cpsi_msg, 0, 128);
+    modem->get_cpsi(modem->cell_info.cpsi_msg);
 
-    if (modem->get_cereg(cereg_msg) > 0) {
+    if (modem->get_cereg(modem->cell_info.cereg_msg) > 0) {
       sprintf(stat_payload, stat_pattern, modem->cell_info.imei,
               (unsigned int)rtc_read(), firmware_vers, Dev_Group, period_min,
-              str_stat, modem->cell_info.sig, modem->cell_info.ber, cops_msg,
-              cereg_msg, msg_cpsi);
+              str_stat, modem->cell_info.sig, modem->cell_info.ber,
+              modem->cell_info.cops_msg, modem->cell_info.cereg_msg,
+              modem->cell_info.cpsi_msg);
       modem->mqtt_publish(stat_topic, stat_payload);
     }
   }

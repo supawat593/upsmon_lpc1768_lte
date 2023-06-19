@@ -1,20 +1,6 @@
 
 #include "./ExtStorage.h"
 
-// char xinit_cfg_pattern[] = {"%*[^\n]\nBroker: \"%[^\"]\"\nPort: %d\nKey: "
-//                             "\"%[^\"]\"\nTopic: \"%[^\"]\"\nCommand: "
-//                             "[%[^]]]\nModel: \"%[^\"]\"\nSite_ID: "
-//                             "\"%[^\"]\"\n%*s"};
-
-// char xinit_cfg_write[] = {
-//     "#Configuration file for UPS Monitor\r\n\r\nSTART:\r\nBroker: "
-//     "\"%s\"\r\nPort: %d\r\nKey: \"%s\"\r\nTopic: \"%s\"\r\nCommand: "
-//     "[%s]\r\nModel: \"%s\"\r\nSite_ID: \"%s\"\r\nSTOP:"};
-
-// ExtStorage::ExtStorage(BlockDevice *_bd, FATFileSystem *_fs)
-//     : bd(_bd), fs(_fs) {
-//   is_script_read = false;
-// }
 ExtStorage::ExtStorage(BlockDevice *_bd, FATFileSystem *_fs) {
   bd = _bd;
   fs = _fs;
@@ -52,8 +38,8 @@ void ExtStorage::write_init_script(init_script_t *_script, char path[128],
     printf("initial script found\r\n");
     char fbuffer[512];
     sprintf(fbuffer, xinit_cfg_write, _script->broker, _script->port,
-            encode_xkey, _script->topic_path, _script->full_cmd, _script->model,
-            _script->siteID);
+            _script->encoded_key, _script->topic_path, _script->full_cmd,
+            _script->model, _script->siteID);
 
     // sprintf(fbuffer, "Hello : %d\r\n",15);
 
@@ -126,10 +112,6 @@ void ExtStorage::apply_script(FILE *file, char path[128],
 
   char key_encoded[64];
 
-  //   if (sscanf(script_buff, init_cfg_pattern, init_script.broker,
-  //              &init_script.port, init_script.usr, init_script.pwd,
-  //              init_script.topic_path, init_script.full_cmd,
-  //              init_script.model, init_script.siteID) == 8) {
   if (sscanf(script_buff, xinit_cfg_pattern, _script->broker, &_script->port,
              key_encoded, _script->topic_path, _script->full_cmd,
              _script->model, _script->siteID) == 7) {
@@ -149,15 +131,6 @@ void ExtStorage::apply_script(FILE *file, char path[128],
     printf("    siteID: %s\r\n", _script->siteID);
     printf("<---------------------------------------->\r\n\n");
 
-    // size_t len_key_encode = (size_t)strlen(key_encoded);
-    // size_t len_key_decode;
-    // char *key_decode1 =
-    //     base64_obj.Decode(key_encoded, len_key_encode, &len_key_decode);
-
-    // size_t len_key_decode2;
-    // char *key_decode2 =
-    //     base64_obj.Decode(key_decode1, len_key_decode, &len_key_decode2);
-
     char key_encoded2[64];
     char *key_decode2;
     strcpy(key_encoded2, key_encoded);
@@ -167,7 +140,7 @@ void ExtStorage::apply_script(FILE *file, char path[128],
 
     for (int ix = 0; ix < 2; ix++) {
       key_decode2 =
-          base64_objx.Decode(key_encoded2, len_key_encode, &len_key_decode);
+          base64.Decode(key_encoded2, len_key_encode, &len_key_decode);
 
       len_key_encode = len_key_decode;
       strcpy(key_encoded2, key_decode2);
@@ -178,7 +151,7 @@ void ExtStorage::apply_script(FILE *file, char path[128],
     if (sscanf(key_decode2, "%[^ ] %[^\n]", _script->usr, _script->pwd) == 2) {
       //   printf("usr=%s pwd=%s\r\n", init_script.usr, init_script.pwd);
       is_script_read = true;
-      strcpy(encode_xkey, key_encoded);
+      strcpy(_script->encoded_key, key_encoded);
     }
   }
 

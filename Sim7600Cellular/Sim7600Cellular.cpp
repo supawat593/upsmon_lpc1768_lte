@@ -227,7 +227,7 @@ int Sim7600Cellular::get_creg(char *payload) {
 }
 
 int Sim7600Cellular::set_cereg(int n) {
-  char cmd[10];
+  char cmd[15];
   sprintf(cmd, "AT+CEREG=%d", n);
   if (_atc->send(cmd) && _atc->recv("OK")) {
     printf("modem set---> AT+CEREG=%d\r\n", n);
