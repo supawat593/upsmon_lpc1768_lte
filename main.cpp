@@ -18,8 +18,6 @@
 #include "FATFileSystem.h"
 #include "SPIFBlockDevice.h"
 
-#include "Base64.h"
-
 // Blinking rate in milliseconds
 #define BLINKING_RATE 500ms
 #define CRLF "\r\n"
@@ -84,8 +82,6 @@ Thread isr_thread(osPriorityAboveNormal, 0x400, nullptr, "isr_queue_thread");
 EventQueue isr_queue;
 
 init_script_t init_script, iap_init_script;
-
-Base64 base64_obj;
 
 int read_xparser_to_char(char *tbuf, int size, char end, ATCmdParser *_xparser);
 void device_stat_update(const char *stat_mode = "NORMAL");
@@ -286,6 +282,7 @@ int script_config_process(char cfg_msg[512], init_script_t *_script) {
     ptr = strtok(NULL, delim);
   }
 
+  char raw_usr[16], raw_pwd[16];
   int cfg_success = 0;
 
   for (int i = 0; i < n_cmd; i++) {
@@ -304,7 +301,7 @@ int script_config_process(char cfg_msg[512], init_script_t *_script) {
       cfg_success++;
     } else if (sscanf(str_cmd[i], "Key: \"%[^\"]\"", raw_key) == 1) {
 
-      char raw_usr[16], raw_pwd[16];
+      //   char raw_usr[16], raw_pwd[16];
       char key_encoded2[64];
       char *key_decode2;
       strcpy(key_encoded2, raw_key);
@@ -325,6 +322,38 @@ int script_config_process(char cfg_msg[512], init_script_t *_script) {
         memset(init_script.encoded_key, 0, 64);
         memcpy(&init_script.encoded_key, &raw_key, strlen(raw_key));
         printf("configuration process: Key Changed" CRLF);
+        cfg_success++;
+      }
+    } else if (sscanf(str_cmd[i], "Auth_Key: \"%[^ ] %[^\"]\"", raw_usr,
+                      raw_pwd) == 2) {
+
+      //   char raw_usr[16], raw_pwd[16];
+      char key_decoded[64];
+      char *key_encode2;
+      memset(raw_key, 0, 64);
+      strcpy(raw_key, raw_usr);
+      strcat(raw_key, " ");
+      strcat(raw_key, raw_pwd);
+      strcpy(key_decoded, raw_key);
+
+      size_t len_key_decode = (size_t)strlen(raw_key);
+      size_t len_key_encode;
+
+      for (int ix = 0; ix < 2; ix++) {
+        key_encode2 =
+            base64_obj.Encode(key_decoded, len_key_decode, &len_key_encode);
+
+        if (key_encode2 != NULL) {
+
+          len_key_decode = len_key_encode;
+          strcpy(key_decoded, key_encode2);
+        }
+      }
+
+      if (len_key_encode > 0) {
+        memset(init_script.encoded_key, 0, 64);
+        strcpy(init_script.encoded_key, key_encode2);
+        printf("Key generation from Auth_Key Complete" CRLF);
         cfg_success++;
       }
     } else {

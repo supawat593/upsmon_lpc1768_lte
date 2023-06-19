@@ -1,7 +1,9 @@
+#include "Base64.h"
 #include "FlashIAPBlockDevice.h"
 #include "devices_src.h"
 #include "mbed.h"
 #include "typedef_src.h"
+
 
 #define iap_script_offset 0
 #define iap_startup_offset 0x8000 // 32768
@@ -26,6 +28,8 @@ MemoryPool<blink_t, 1> blink_mpool;
 Queue<blink_t, 1> blink_queue;
 
 Mail<mail_t, 8> mail_box, ret_usb_mail;
+
+Base64 base64_obj;
 
 volatile bool is_usb_cnnt = false;
 volatile bool is_idle_rs232 = true;
