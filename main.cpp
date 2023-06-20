@@ -76,7 +76,8 @@ char str_sub_topic[128];
 
 Thread blink_thread(osPriorityNormal, 0x100, nullptr, "blink_thread"),
     netstat_thread(osPriorityNormal, 0x100, nullptr, "netstat_thread"),
-    capture_thread, usb_thread,
+    capture_thread(osPriorityNormal, 0x400, nullptr, "data_capture_thread"),
+    usb_thread,
     mdm_notify_thread(osPriorityNormal, 0x1000, nullptr, "mdm_notify_thread");
 Thread isr_thread(osPriorityAboveNormal, 0x400, nullptr, "isr_queue_thread");
 EventQueue isr_queue;
@@ -196,6 +197,8 @@ void capture_thread_routine() {
     ptr = strtok(NULL, delim);
   }
 
+  printf("---> start Capture Thread <---\r\n");
+
   while (true) {
     // printf("*********************************" CRLF);
     // printf("capture---> timestamp: %d" CRLF, (unsigned int)rtc_read());
@@ -267,7 +270,7 @@ void capture_thread_routine() {
 }
 
 int script_config_process(char cfg_msg[512], init_script_t *_script) {
-  char str_cmd[10][100];
+  char str_cmd[10][64];
   char raw_key[64];
   char delim[] = "&";
   char *ptr;
@@ -287,7 +290,7 @@ int script_config_process(char cfg_msg[512], init_script_t *_script) {
 
   for (int i = 0; i < n_cmd; i++) {
 
-    debug("str_cmd[%d] ---> %s\r\n", i, str_cmd[i]);
+    // debug("str_cmd[%d] ---> %s\r\n", i, str_cmd[i]);
     if (sscanf(str_cmd[i], "Command: [%[^]]]", init_script.full_cmd) == 1) {
       cfg_success++;
     } else if (sscanf(str_cmd[i], "Topic: \"%[^\"]\"",
@@ -515,16 +518,12 @@ int main() {
   sys_time_ms = modem->read_sys_time();
   modem->ctrl_timer(0);
   modem->check_modem_status(3) ? netstat_led(IDLE) : netstat_led(OFF);
-  //   netstat_thread.start(callback(blip_netstat, &netstat));
 
-  //   if (is_script_read && modem->initial_NW()) {
-  //     netstat_led(CONNECTED);
-  //   }
   if (ext.get_script_flag() && modem->initial_NW()) {
     netstat_led(CONNECTED);
   }
 
-  modem->ntp_sync(&last_ntp_sync);
+  modem->ntp_setup();
 
   if (modem->get_cclk(modem->cell_info.cclk_msg)) {
     modem->sync_rtc(modem->cell_info.cclk_msg);
@@ -557,7 +556,7 @@ int main() {
     set_mdm_busy(false);
   }
 
-  mdm_notify_thread.start(callback(mdm_notify_routine));
+  //   mdm_notify_thread.start(callback(mdm_notify_routine));
 
   if (bmqtt_cnt) {
     memset(str_sub_topic, 0, 128);
@@ -570,9 +569,9 @@ int main() {
     // }
   }
 
-  //   capture_thread.start(callback(capture_thread_routine));
+  capture_thread.start(callback(capture_thread_routine));
   //   usb_thread.start(callback(usb_passthrough));
-  //   mdm_notify_thread.start(callback(mdm_notify_routine));
+  mdm_notify_thread.start(callback(mdm_notify_routine));
 
   //   pwake.fall(&fall_wake);
 
@@ -614,7 +613,7 @@ int main() {
     //  else NullPtr
     else {
       //   if (((unsigned int)rtc_read() - last_rtc_check_NW) > 55) {
-      if ((((unsigned int)rtc_read() - last_rtc_check_NW) > 55) &&
+      if ((((unsigned int)rtc_read() - last_rtc_check_NW) > 65) &&
           (!get_mdm_busy())) {
         last_rtc_check_NW = (unsigned int)rtc_read();
         printf(CRLF "<----- Checking NW. Status ----->" CRLF);
@@ -672,15 +671,15 @@ int main() {
           debug_if(modem->get_csq(&modem->cell_info.sig, &modem->cell_info.ber),
                    "sig=%d ber=%d\r\n", modem->cell_info.sig,
                    modem->cell_info.ber);
-          memset(modem->cell_info.cpsi_msg, 0, 128);
 
+          memset(modem->cell_info.cpsi_msg, 0, 128);
           debug_if(modem->get_cpsi(modem->cell_info.cpsi_msg), "cpsi=> %s\r\n",
                    modem->cell_info.cpsi_msg);
 
           mdmAtt = modem->check_attachNW();
           if (mdmAtt && (modem->get_creg() == 1)) {
-            netstat_led(CONNECTED);
 
+            netstat_led(CONNECTED);
             debug_if(modem->get_IPAddr(modem->cell_info.ipaddr),
                      "ipaddr= %s\r\n", modem->cell_info.ipaddr);
 
@@ -785,7 +784,13 @@ int main() {
             // }
 
             if (((unsigned int)rtc_read() - last_ntp_sync) > 3600) {
-              modem->ntp_sync(&last_ntp_sync);
+              modem->ntp_setup();
+              memset(modem->cell_info.cclk_msg, 0, 32);
+              if (modem->get_cclk(modem->cell_info.cclk_msg)) {
+                modem->sync_rtc(modem->cell_info.cclk_msg);
+                printf("timestamp : %d\r\n", (unsigned int)rtc_read());
+              }
+
               last_ntp_sync = (int)rtc_read();
               device_stat_update();
             }
@@ -860,8 +865,6 @@ void device_stat_update(const char *stat_mode) {
   if (bmqtt_cnt) {
     char stat_payload[512];
     char stat_topic[128];
-    // char cereg_msg[64];
-    // char cops_msg[64];
     char str_stat[15];
     strcpy(str_stat, stat_mode);
     sprintf(stat_topic, "%s/status/%s", init_script.topic_path,

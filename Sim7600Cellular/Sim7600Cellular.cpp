@@ -44,10 +44,10 @@ bool Sim7600Cellular::check_modem_status(int rty) {
       //   ThisThread::sleep_for(100ms);
       if (_atc->recv("OK")) {
         bAT_OK = true;
-        printf("Module SIM7600  OK\r\n");
+        // debug("Module SIM7600  OK\r\n");
       } else {
         bAT_OK = false;
-        printf("Module SIM7600  Fail : %d\r\n", i);
+        debug("Module SIM7600  Fail : %d\r\n", i);
       }
     }
   }
@@ -76,24 +76,30 @@ bool Sim7600Cellular::save_setting() {
   return false;
 }
 
-void Sim7600Cellular::ntp_sync(int *last_sync) {
+void Sim7600Cellular::set_ntp_srv(char *srv, int tz_q) {
+  char cmd_ntp[100];
+  sprintf(cmd_ntp, "AT+CNTP=\"%s\",%d", srv, tz_q);
 
-  if (_atc->send("AT+CNTP=\"time1.google.com\",28") && _atc->recv("OK")) {
-    printf("set ntp server Done\r\n");
-    char ret_ntp[64];
-
-    if (_atc->send("AT+CNTP?") && _atc->scanf("+CNTP: %[^\n]\r\n", ret_ntp)) {
-      printf("ret_ntp--> +CNTP: %s\r\n", ret_ntp);
-      _atc->set_timeout(15000);
-
-      if (_atc->send("AT+CNTP") && _atc->recv("+CNTP: 0")) {
-        //   if (_parser->send("AT+CNTP") && _parser->recv("OK")) {
-        printf("NTP: Operation succeeded\r\n");
-        *last_sync = (int)rtc_read();
-      }
-      _atc->set_timeout(8000);
-    }
+  if (_atc->send(cmd_ntp) && _atc->recv("OK")) {
+    printf("set ntp_srv: [%s] Done\r\n", srv);
   }
+}
+
+int Sim7600Cellular::get_ntp_srv(char *ntp_srv) {
+  char ret_ntp[64];
+
+  if (_atc->send("AT+CNTP?") && _atc->scanf("+CNTP: %[^\n]\r\n", ret_ntp)) {
+    strcpy(ntp_srv, ret_ntp);
+    return 1;
+  }
+  strcpy(ntp_srv, "");
+  return -1;
+}
+
+bool Sim7600Cellular::check_ntp_status() {
+  int err = -1;
+  _atc->send("AT+CNTP") && _atc->recv("+CNTP: %d\r\n", &err);
+  return (err == 0) ? true : false;
 }
 
 bool Sim7600Cellular::check_attachNW() {
@@ -138,24 +144,13 @@ int Sim7600Cellular::get_csq(int *power, int *ber, int retry) {
   _atc->set_timeout(2000);
   while ((i < retry) && (_power == 99)) {
     if (_atc->send("AT+CSQ") && _atc->recv("+CSQ: %d,%d\r\n", &_power, &_ber)) {
-      printf("retry: %d -> +CSQ: %d,%d\r\n", i, _power, _ber);
+      debug("retry: %d -> +CSQ: %d,%d\r\n", i, _power, _ber);
     }
     i++;
     ThisThread::sleep_for(1000);
   }
   _atc->set_timeout(8000);
 
-  //   if (_atc->send("AT+CSQ") && _atc->recv("+CSQ: %[^\n]\r\n", ret)) {
-  //     // printf("ret= %s\r\n",ret);
-  //     if (sscanf(ret, "%d,%d", &_power, &_ber) == 2) {
-  //       *power = _power;
-  //       *ber = _ber;
-  //       return 1;
-  //     }
-  //     *power = 0;
-  //     *ber = 0;
-  //     return 0;
-  //   }
   if (i < retry) {
     *power = _power;
     *ber = _ber;

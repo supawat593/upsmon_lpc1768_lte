@@ -4,7 +4,6 @@
 #include "mbed.h"
 #include "typedef_src.h"
 
-
 #define iap_script_offset 0
 #define iap_startup_offset 0x8000 // 32768
 
@@ -37,6 +36,7 @@ volatile bool is_mdm_busy = true;
 volatile bool is_notify_ready = false;
 
 void printout_mqttsub_notify(rx_notify_t *data) {
+  mutex_notify.lock();
   printf("<-------------------------------------------------\r\n");
   printf("len_topic=%d\r\n", data->len_topic);
   printf("sub_topic=%s\r\n", data->sub_topic);
@@ -44,6 +44,7 @@ void printout_mqttsub_notify(rx_notify_t *data) {
   printf("sub_payload=%s\r\n", data->sub_payload);
   printf("client_idx=%d\r\n", data->client_idx);
   printf("------------------------------------------------->\r\n");
+  mutex_notify.unlock();
 }
 
 bool get_notify_ready() {

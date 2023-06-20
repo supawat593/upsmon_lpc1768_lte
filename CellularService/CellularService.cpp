@@ -37,28 +37,7 @@ bool CellularService::MDM_HW_reset(void) {
 }
 
 bool CellularService::initial_NW() {
-  //   vrf_en = 1;
-  //   tm1.start();
-  //   int sys_time_ms = read_sys_time();
 
-  //   while ((read_sys_time() - sys_time_ms < 18000))
-  //     ;
-  //   debug_if(read_sys_time() - sys_time_ms > 18000,
-  //            "MDM_STAT Timeout : %d sec.\r\n", read_sys_time() -
-  //            sys_time_ms);
-
-  //   //   if (read_sys_time() - sys_time_ms > 18000) {
-  //   //     printf("MDM_STAT Timeout : %d sec.\r\n", read_sys_time() -
-  //   //     sys_time_ms); sys_time_ms = read_sys_time();
-  //   //   }
-
-  //   sys_time_ms = read_sys_time();
-  //   tm1.stop();
-
-  //   char revID[20];
-  //   char imei[16];
-  //   char iccid[20];
-  //   int sig, ber;
   bool mdmAtt = false;
   bool mdmOK = this->check_modem_status();
 
@@ -95,9 +74,11 @@ bool CellularService::initial_NW() {
     ThisThread::sleep_for(2000ms);
   }
 
-  debug_if(mdmAtt, "NW Attached!!!\r\n");
-  debug_if(this->get_csq(&cell_info.sig, &cell_info.ber), "sig=%d ber=%d\r\n",
-           cell_info.sig, cell_info.ber);
+  debug_if(!mdmAtt, "NW Attaching Fail ...\r\n");
+  //   debug_if(this->get_csq(&cell_info.sig, &cell_info.ber), "sig=%d
+  //   ber=%d\r\n",
+  //            cell_info.sig, cell_info.ber);
+  this->get_csq(&cell_info.sig, &cell_info.ber);
 
   while (this->get_creg() != 1)
     ;
@@ -107,6 +88,14 @@ bool CellularService::initial_NW() {
     return true;
   }
   return false;
+}
+
+void CellularService::ntp_setup(const char *srv, int tz_q) {
+
+  char ret_ntp[64];
+  this->set_ntp_srv((char *)srv, tz_q);
+  debug_if(this->get_ntp_srv(ret_ntp) > 0, "ntp_srv--> +CNTP: %s\r\n", ret_ntp);
+  debug_if(this->check_ntp_status(), "NTP: Operation succeeded\r\n");
 }
 
 void CellularService::sync_rtc(char cclk[64]) {

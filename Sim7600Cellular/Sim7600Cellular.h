@@ -12,7 +12,11 @@ public:
   bool check_modem_status(int rty = 20);
   bool enable_echo(bool en);
   bool save_setting();
-  void ntp_sync(int *last_sync);
+
+  void set_ntp_srv(char *srv, int tz_q);
+  int get_ntp_srv(char *ntp_srv);
+  bool check_ntp_status();
+
   bool check_attachNW();
   int set_cops(int mode = 0, int format = 2);
   int get_cops(char *cops);

@@ -14,6 +14,8 @@ public:
   void vrf_enable(bool en = false);
   bool MDM_HW_reset(void);
   bool initial_NW();
+  // srv= time1.google.com --> ipaddr= 216.239.35.0
+  void ntp_setup(const char *srv = "time1.google.com", int tz_q = 28);
   void sync_rtc(char cclk[64]);
   void ctrl_timer(bool in);
   int read_sys_time();
