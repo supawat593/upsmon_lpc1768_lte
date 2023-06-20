@@ -1,7 +1,7 @@
 {
     "target_overrides":{
         "*":{
-            "rtos.main-thread-stack-size":"0x1000",
+            "rtos.main-thread-stack-size":"0x0800",
             "platform.stdio-baud-rate": 115200,
             "platform.callback-nontrivial": true,
             "platform.stdio-convert-newlines":true,

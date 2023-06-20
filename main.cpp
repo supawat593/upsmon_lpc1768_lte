@@ -10,17 +10,11 @@
 #include <cstring>
 
 #include "./TimerTPL5010/TimerTPL5010.h"
-// #include "Sim7600Cellular.h"
-#include "./CellularService/CellularService.h"
-#include "USBSerial.h"
+// #include "USBSerial.h"
 
 #include "./ExtStorage/ExtStorage.h"
 #include "FATFileSystem.h"
 #include "SPIFBlockDevice.h"
-
-// Blinking rate in milliseconds
-#define BLINKING_RATE 500ms
-#define CRLF "\r\n"
 
 DigitalOut myled(LED1, 1);
 DigitalOut netstat(LED2, 0);
@@ -58,13 +52,12 @@ BusIn dipsw(DIPSW_P4_PIN, DIPSW_P3_PIN, DIPSW_P2_PIN, DIPSW_P1_PIN);
 
 // volatile bool isWake = false;
 volatile bool is_script_read = false;
+volatile bool is_usb_plug = false;
 bool mdmOK = false;
 bool mdmAtt = false;
 bool bmqtt_start = false;
 bool bmqtt_cnt = false;
 bool bmqtt_sub = false;
-
-int period_min = 0;
 
 int last_ntp_sync = 0;
 unsigned int last_rtc_check_NW = 0;
@@ -76,60 +69,22 @@ char str_sub_topic[128];
 
 Thread blink_thread(osPriorityNormal, 0x100, nullptr, "blink_thread"),
     netstat_thread(osPriorityNormal, 0x100, nullptr, "netstat_thread"),
-    capture_thread(osPriorityNormal, 0x400, nullptr, "data_capture_thread"),
-    usb_thread,
-    mdm_notify_thread(osPriorityNormal, 0x1000, nullptr, "mdm_notify_thread");
+    capture_thread(osPriorityNormal, 0x500, nullptr, "data_capture_thread"),
+    mdm_notify_thread(osPriorityNormal, 0x0c00, nullptr, "mdm_notify_thread");
+
+Thread *usb_thread;
 Thread isr_thread(osPriorityAboveNormal, 0x400, nullptr, "isr_queue_thread");
+
 EventQueue isr_queue;
 
 init_script_t init_script, iap_init_script;
 
-int read_xparser_to_char(char *tbuf, int size, char end, ATCmdParser *_xparser);
-void device_stat_update(const char *stat_mode = "NORMAL");
-
 uint8_t read_dipsw() { return (~dipsw.read()) & 0x0f; }
 
-int detection_notify(const char *keyword, char *src, char *dst) {
-  int st = 0, end = 0;
-  int len_keyword = 0;
-  len_keyword = strlen(keyword);
-
-  int len_src = 0;
-  if (strlen(src) > 1) {
-    len_src = strlen(src);
-  } else {
-    len_src = 512;
-  }
-
-  //   printf("Notify: len_src=%d\r\n", len_src);
-  // printHEX((unsigned char *)src, len_src);
-
-  char end_text[] = {0x0d, 0x0a, 0x00, 0x00};
-  st = 0;
-  end = 0;
-
-  while ((strncmp(&src[st], keyword, len_keyword) != 0) && (st < len_src)) {
-    st++;
-  }
-
-  end = st;
-  while ((strncmp(&src[end], end_text, 4) != 0) && (end < len_src)) {
-    end++;
-  }
-
-  if (st < len_src) {
-    memcpy(&dst[0], &src[st], end - st + 2);
-    return 1;
-  } else {
-    strcpy(dst, "");
-    return 0;
-  }
-}
-
 void usb_passthrough() {
-  printf("\r\n----------------------------------\r\n");
-  printf("start usb_passthrough Thread...\r\n");
-  printf("----------------------------------\r\n");
+
+  printf("---> start usb_passthrough Thread ...\r\n");
+
   char str_usb_ret[128];
   USBSerial pc2;
 
@@ -189,6 +144,7 @@ void capture_thread_routine() {
   //   ptr = strtok(init_script.full_cmd, delim);
   ptr = strtok(full_cmd, delim);
   int n_cmd = 0;
+  Timer duration_tme;
 
   while ((ptr != 0) && (n_cmd < 6)) {
     // strcpy(str_cmd_buff[k], ptr);
@@ -206,6 +162,8 @@ void capture_thread_routine() {
 
     // is_idle_rs232 = false;
     set_idle_rs232(false);
+    duration_tme.reset();
+    duration_tme.start();
 
     for (int j = 0; j < n_cmd; j++) {
       ThisThread::sleep_for(1s);
@@ -261,110 +219,16 @@ void capture_thread_routine() {
     set_idle_rs232(true);
 
     period_min = read_dipsw();
-    if (period_min < 2) {
-      period_min = 2;
-    }
+    // if (period_min < 2) {
+    //   period_min = 2;
+    // }
+    static int cmd_period =
+        duration_cast<chrono::seconds>(duration_tme.elapsed_time()).count();
+    duration_tme.stop();
 
-    ThisThread::sleep_for(chrono::minutes(period_min));
+    // ThisThread::sleep_for(chrono::minutes(period_min));
+    ThisThread::sleep_for(chrono::seconds(60 * period_min - cmd_period));
   }
-}
-
-int script_config_process(char cfg_msg[512], init_script_t *_script) {
-  char str_cmd[10][64];
-  char raw_key[64];
-  char delim[] = "&";
-  char *ptr;
-  //   ptr = strtok(init_script.full_cmd, delim);
-  ptr = strtok(cfg_msg, delim);
-  int n_cmd = 0;
-
-  while ((ptr != 0) && (n_cmd < 10)) {
-    strcpy(str_cmd[n_cmd], ptr);
-    // sscanf(ptr, "\"%[^\"]\"", str_cmd[n_cmd]);
-    n_cmd++;
-    ptr = strtok(NULL, delim);
-  }
-
-  char raw_usr[16], raw_pwd[16];
-  int cfg_success = 0;
-
-  for (int i = 0; i < n_cmd; i++) {
-
-    // debug("str_cmd[%d] ---> %s\r\n", i, str_cmd[i]);
-    if (sscanf(str_cmd[i], "Command: [%[^]]]", init_script.full_cmd) == 1) {
-      cfg_success++;
-    } else if (sscanf(str_cmd[i], "Topic: \"%[^\"]\"",
-                      init_script.topic_path) == 1) {
-      cfg_success++;
-    } else if (sscanf(str_cmd[i], "Model: \"%[^\"]\"", init_script.model) ==
-               1) {
-      cfg_success++;
-    } else if (sscanf(str_cmd[i], "Site_ID: \"%[^\"]\"", init_script.siteID) ==
-               1) {
-      cfg_success++;
-    } else if (sscanf(str_cmd[i], "Key: \"%[^\"]\"", raw_key) == 1) {
-
-      //   char raw_usr[16], raw_pwd[16];
-      char key_encoded2[64];
-      char *key_decode2;
-      strcpy(key_encoded2, raw_key);
-
-      size_t len_key_encode = (size_t)strlen(key_encoded2);
-      size_t len_key_decode;
-
-      for (int ix = 0; ix < 2; ix++) {
-        key_decode2 =
-            base64_obj.Decode(key_encoded2, len_key_encode, &len_key_decode);
-
-        len_key_encode = len_key_decode;
-        strcpy(key_encoded2, key_decode2);
-      }
-
-      if (sscanf(key_decode2, "%[^ ] %[^\n]", raw_usr, raw_pwd) == 2) {
-
-        memset(init_script.encoded_key, 0, 64);
-        memcpy(&init_script.encoded_key, &raw_key, strlen(raw_key));
-        printf("configuration process: Key Changed" CRLF);
-        cfg_success++;
-      }
-    } else if (sscanf(str_cmd[i], "Auth_Key: \"%[^ ] %[^\"]\"", raw_usr,
-                      raw_pwd) == 2) {
-
-      //   char raw_usr[16], raw_pwd[16];
-      char key_decoded[64];
-      char *key_encode2;
-      memset(raw_key, 0, 64);
-      strcpy(raw_key, raw_usr);
-      strcat(raw_key, " ");
-      strcat(raw_key, raw_pwd);
-      strcpy(key_decoded, raw_key);
-
-      size_t len_key_decode = (size_t)strlen(raw_key);
-      size_t len_key_encode;
-
-      for (int ix = 0; ix < 2; ix++) {
-        key_encode2 =
-            base64_obj.Encode(key_decoded, len_key_decode, &len_key_encode);
-
-        if (key_encode2 != NULL) {
-
-          len_key_decode = len_key_encode;
-          strcpy(key_decoded, key_encode2);
-        }
-      }
-
-      if (len_key_encode > 0) {
-        memset(init_script.encoded_key, 0, 64);
-        strcpy(init_script.encoded_key, key_encode2);
-        printf("Key generation from Auth_Key Complete" CRLF);
-        cfg_success++;
-      }
-    } else {
-      printf("Not Matched!\r\n");
-    }
-  }
-
-  return cfg_success;
 }
 
 void mdm_notify_routine() {
@@ -375,6 +239,10 @@ void mdm_notify_routine() {
   int len_topic = 0;
   int len_payload = 0;
   int st = 0, end = 0;
+
+  memcpy(&script_bkp, &init_script, sizeof(init_script_t));
+  volatile bool is_rx_mqtt = false;
+  rx_notify_t rx_mqttsub_msg = {"\0", "\0", 0, 0, 0};
 
   while (true) {
     // if (get_notify_ready() && (!get_mdm_busy()) && mdm.readable()) {
@@ -391,6 +259,7 @@ void mdm_notify_routine() {
         if (detection_notify("+CMQTTRXSTART:", mdm_xbuf, xbuf_trim)) {
 
           printf("Notify msg: %s\r\n", xbuf_trim);
+
           int len_buf = 512;
           if (sscanf(xbuf_trim, "+CMQTTRXSTART: %*d,%d,%d", &len_topic,
                      &len_payload) == 2) {
@@ -415,21 +284,14 @@ void mdm_notify_routine() {
 
             memcpy(&xbuf_trim[0], &mdm_xbuf[st], sizeof(mdm_xbuf) - st);
             // printf("Notify msg: %s\r\n", xbuf_trim);
-            static rx_notify_t rx_mqttsub_msg = {"\0", "\0", 0, 0, 0};
+            rx_mqttsub_msg = {"\0", "\0", 0, 0, 0};
             if (sscanf(xbuf_trim, mqtt_sub_topic_pattern,
                        &rx_mqttsub_msg.len_topic, rx_mqttsub_msg.sub_topic,
                        &rx_mqttsub_msg.len_payload, rx_mqttsub_msg.sub_payload,
                        &rx_mqttsub_msg.client_idx) == 5) {
 
               printout_mqttsub_notify(&rx_mqttsub_msg);
-
-              if (script_config_process(rx_mqttsub_msg.sub_payload,
-                                        &init_script) > 0) {
-
-                ext.write_init_script(&init_script, FULL_SCRIPT_FILE_PATH);
-                ext.deinit();
-                system_reset();
-              }
+              is_rx_mqtt = true;
             }
           }
 
@@ -451,6 +313,19 @@ void mdm_notify_routine() {
         } else {
         }
 
+        if (is_rx_mqtt) {
+          //   debug("is_rx_mqtt: true\r\n");
+
+          if (script_config_process(rx_mqttsub_msg.sub_payload) > 0) {
+
+            debug("before write script file\r\n");
+            ext.write_init_script(&script_bkp, FULL_SCRIPT_FILE_PATH);
+            ext.deinit();
+            system_reset();
+          }
+          is_rx_mqtt = false;
+        }
+
         set_mdm_busy(false);
       }
     }
@@ -460,12 +335,9 @@ void mdm_notify_routine() {
 int main() {
 
   // Initialise the digital pin LED1 as an output
-  //   kick_wdt();
+
   rtc_init();
-  period_min = read_dipsw();
-  if (period_min < 2) {
-    period_min = 2;
-  }
+  period_min = (read_dipsw() < 1) ? 1 : read_dipsw();
 
   printf("\r\n\n----------------------------------------\r\n");
   printf("| Hello,I am UPSMON_LPC1768_SIM7600E-H |\r\n");
@@ -548,7 +420,7 @@ int main() {
     bmqtt_cnt = modem->mqtt_connect(modem->cell_info.dns_ip, init_script.usr,
                                     init_script.pwd, init_script.port);
     debug_if(bmqtt_cnt, "MQTT Connected\r\n");
-    device_stat_update("RESTART");
+    device_stat_update(modem, init_script.topic_path, "RESTART");
   }
 
   if (ext.get_script_flag()) {
@@ -569,9 +441,9 @@ int main() {
     // }
   }
 
+  mdm_notify_thread.start(callback(mdm_notify_routine));
   capture_thread.start(callback(capture_thread_routine));
   //   usb_thread.start(callback(usb_passthrough));
-  mdm_notify_thread.start(callback(mdm_notify_routine));
 
   //   pwake.fall(&fall_wake);
 
@@ -579,6 +451,20 @@ int main() {
 
     if (tpl5010.get_wdt()) {
       tpl5010.set_wdt(false);
+    }
+
+    if ((usb_det.read() > 0) && (!is_usb_plug)) {
+
+      usb_thread = new Thread(osPriorityNormal, 0x800, nullptr, "usb_thread");
+      usb_thread->start(callback(usb_passthrough));
+      is_usb_plug = true;
+    }
+
+    if ((usb_det.read() < 1) && (is_usb_plug)) {
+
+      debug_if(usb_thread->terminate() == osOK, "usb_thread Terminated\r\n");
+      delete usb_thread;
+      is_usb_plug = false;
     }
 
     mail_t *mail = mail_box.try_get_for(Kernel::Clock::duration(500));
@@ -792,7 +678,7 @@ int main() {
               }
 
               last_ntp_sync = (int)rtc_read();
-              device_stat_update();
+              device_stat_update(modem, init_script.topic_path);
             }
 
           } else {
@@ -834,55 +720,3 @@ int main() {
     }   // end else NullPtr
   }     // end while(true)
 } // end main()
-
-int read_xparser_to_char(char *tbuf, int size, char end,
-                         ATCmdParser *_xparser) {
-  int count = 0;
-  int x = 0;
-
-  if (size > 0) {
-    for (count = 0; (count < size) && (x >= 0) && (x != end); count++) {
-      x = _xparser->getc();
-      *(tbuf + count) = (char)x;
-    }
-
-    count--;
-    *(tbuf + count) = 0;
-
-    // Convert line endings:
-    // If end was '\n' (0x0a) and the preceding character was 0x0d, then
-    // overwrite that with null as well.
-    if ((count > 0) && (end == '\n') && (*(tbuf + count - 1) == '\x0d')) {
-      count--;
-      *(tbuf + count) = 0;
-    }
-  }
-
-  return count;
-}
-
-void device_stat_update(const char *stat_mode) {
-  if (bmqtt_cnt) {
-    char stat_payload[512];
-    char stat_topic[128];
-    char str_stat[15];
-    strcpy(str_stat, stat_mode);
-    sprintf(stat_topic, "%s/status/%s", init_script.topic_path,
-            modem->cell_info.imei);
-    modem->set_cereg(2);
-    modem->get_csq(&modem->cell_info.sig, &modem->cell_info.ber);
-    modem->get_cops(modem->cell_info.cops_msg);
-
-    memset(modem->cell_info.cpsi_msg, 0, 128);
-    modem->get_cpsi(modem->cell_info.cpsi_msg);
-
-    if (modem->get_cereg(modem->cell_info.cereg_msg) > 0) {
-      sprintf(stat_payload, stat_pattern, modem->cell_info.imei,
-              (unsigned int)rtc_read(), firmware_vers, Dev_Group, period_min,
-              str_stat, modem->cell_info.sig, modem->cell_info.ber,
-              modem->cell_info.cops_msg, modem->cell_info.cereg_msg,
-              modem->cell_info.cpsi_msg);
-      modem->mqtt_publish(stat_topic, stat_payload);
-    }
-  }
-}

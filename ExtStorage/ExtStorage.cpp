@@ -26,6 +26,7 @@ bool ExtStorage::deinit() {
 
   return (err_bd == 0) && (err_fs == 0);
 }
+
 void ExtStorage::write_init_script(init_script_t *_script, char path[128],
                                    const char *fopen_mode) {
   char xinit_cfg_write[] = {
@@ -35,7 +36,8 @@ void ExtStorage::write_init_script(init_script_t *_script, char path[128],
   file_mtx.lock();
   file = fopen(path, fopen_mode);
   if (file != NULL) {
-    debug("initial script found\r\n");
+
+    // debug("initial script found\r\n");
     char fbuffer[512];
     sprintf(fbuffer, xinit_cfg_write, _script->broker, _script->port,
             _script->encoded_key, _script->topic_path, _script->full_cmd,
@@ -44,8 +46,8 @@ void ExtStorage::write_init_script(init_script_t *_script, char path[128],
     // sprintf(fbuffer, "Hello : %d\r\n",15);
 
     debug_if(strlen(fbuffer) > 0,
-             "------------- fbuffer ------------- >\r\n%s\r\n< "
-             "--------------------------\r\n",
+             "< ------------ fbuffer ------------ >\r\n%s\r\n"
+             "< --------------------------------- >\r\n",
              fbuffer);
     fprintf(file, fbuffer);
   }
@@ -53,6 +55,7 @@ void ExtStorage::write_init_script(init_script_t *_script, char path[128],
   fclose(file);
   file_mtx.unlock();
 }
+
 void ExtStorage::read_init_script(init_script_t *_script, char path[128],
                                   const char *fopen_mode) {
 
