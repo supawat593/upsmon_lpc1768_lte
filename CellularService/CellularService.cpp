@@ -135,6 +135,10 @@ void CellularService::ctrl_timer(bool in = false) {
   in ? tm1.start() : tm1.stop();
 }
 
-int CellularService::read_sys_time() {
+int CellularService::read_systime_ms() {
   return duration_cast<chrono::milliseconds>(tm1.elapsed_time()).count();
+}
+
+int CellularService::read_systime_sec() {
+  return duration_cast<chrono::seconds>(tm1.elapsed_time()).count();
 }

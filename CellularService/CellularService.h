@@ -18,7 +18,8 @@ public:
   void ntp_setup(const char *srv = "time1.google.com", int tz_q = 28);
   void sync_rtc(char cclk[64]);
   void ctrl_timer(bool in);
-  int read_sys_time();
+  int read_systime_ms();
+  int read_systime_sec();
 
 private:
   Timer tm1;

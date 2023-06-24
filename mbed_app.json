@@ -5,7 +5,7 @@
             "platform.stdio-baud-rate": 115200,
             "platform.callback-nontrivial": true,
             "platform.stdio-convert-newlines":true,
-            "target.tickless-from-us-ticker":true,
+            "target.tickless-from-us-ticker":false,
             "target.printf_lib":"std",
             "target.features_add":["STORAGE"],
             "target.components_add":["SPIF","FLASHIAP"]
@@ -29,8 +29,8 @@
             "spif-driver.SPI_MISO":"P0_8",
             "spif-driver.SPI_CLK":"P0_7",
             "spif-driver.SPI_CS":"P0_6",
-            "flashiap-block-device.base-address": "0x070000",
-            "flashiap-block-device.size": "0x10000"
+            "flashiap-block-device.base-address": "0x078000",
+            "flashiap-block-device.size": "0x8000"
         }
     }
 }

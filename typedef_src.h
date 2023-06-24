@@ -50,6 +50,12 @@ typedef struct {
   int client_idx;
   int len_topic;
   int len_payload;
-} rx_notify_t;
+} mqttsub_notify_t;
+
+typedef struct {
+  char cereg_msg[64];
+  char rxtopic_msg[512];
+  mqttsub_notify_t mqttsub;
+} oob_notify_t;
 
 #endif

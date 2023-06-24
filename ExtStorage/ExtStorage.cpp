@@ -33,8 +33,11 @@ void ExtStorage::write_init_script(init_script_t *_script, char path[128],
       "#Configuration file for UPS Monitor\r\n\r\nSTART:\r\nBroker: "
       "\"%s\"\r\nPort: %d\r\nKey: \"%s\"\r\nTopic: \"%s\"\r\nCommand: "
       "[%s]\r\nModel: \"%s\"\r\nSite_ID: \"%s\"\r\nSTOP:"};
+
   file_mtx.lock();
   file = fopen(path, fopen_mode);
+  debug_if(file == NULL, "*** fopen fail ! ***\r\n");
+
   if (file != NULL) {
 
     // debug("initial script found\r\n");
@@ -61,6 +64,7 @@ void ExtStorage::read_init_script(init_script_t *_script, char path[128],
 
   file_mtx.lock();
   file = fopen(path, fopen_mode);
+  debug_if(file == NULL, "*** fopen fail ! ***\r\n");
 
   if (file != NULL) {
     printf("initial script found\r\n");
